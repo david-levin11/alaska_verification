@@ -1,4 +1,5 @@
 import os 
+import time
 import requests
 import pandas as pd
 import wind_config as config
@@ -32,6 +33,53 @@ def create_wind_metadata(url, token, state, networks, vars, obrange):
         data = response.json()
     return data
 
+def fetch_wind_obs(base_url, stid, token, vars, start, end):
+    global all_wind_data
+    print(f"Fetching data for station: {stid}...")
+
+    # API request parameters
+    params = {
+        "token": token,
+        "stid": stid,
+        "vars": vars,
+        "start": start,
+        "end": end,
+        "obtimezone": "UTC",
+        "output": "json",
+    }
+
+    # Make the API request
+    response = requests.get(base_url, params=params)
+
+    if response.status_code == 200:
+        data = response.json()
+
+        if "STATION" in data and len(data["STATION"]) > 0:
+            station_data = data["STATION"][0]
+
+            # Extract timestamps, wind speed, and wind direction
+            timestamps = station_data["OBSERVATIONS"]["date_time"]
+            wind_directions = station_data["OBSERVATIONS"].get("wind_direction_set_1", [None]*len(timestamps))
+            wind_speeds = station_data["OBSERVATIONS"].get("wind_speed_set_1", [None]*len(timestamps))
+            wind_gusts = station_data["OBSERVATIONS"].get("wind_gust_set_1", [None]*len(timestamps))
+
+            # Create a DataFrame for the station
+            df_station = pd.DataFrame({
+                "station_id": stid,
+                "timestamp": timestamps,
+                "wind_direction": wind_directions,
+                "wind_speed": wind_speeds,
+                "wind_gust": wind_gusts
+            })
+
+            # Append to the main DataFrame
+            all_wind_data = pd.concat([all_wind_data, df_station], ignore_index=True)
+        else:
+            print(f"Failed to fetch data for station {stid} (Status Code: {response.status_code})")
+
+        # Respect API rate limits
+        time.sleep(1)
+
 def parse_metadata(data):
     stn_dict = {"stid": [], "name": [], "latitude": [], "longitude": [], "elevation": []}
     for stn in data["STATION"]:
@@ -53,3 +101,20 @@ if __name__ == "__main__":
         meta_df = parse_metadata(meta_json)
         meta_df.to_csv(os.path.join(config.OBS, config.METADATA), index=False)
         print(f"All done creating metadata.  Saved {config.METADATA} in {config.OBS}.")
+    
+    # grabbing wind archive at our synoptic metadata sites
+    # Load station list from CSV
+    df_sites = pd.read_csv(os.path.join(config.OBS, config.METADATA))  
+    station_ids = df_sites["stid"].dropna().tolist()
+    # Initialize an empty DataFrame to store results
+    all_wind_data = pd.DataFrame()
+    # fetching obs
+    for stid in station_ids:
+        fetch_wind_obs(config.TIMESERIES_URL, stid, config.API_KEY, config.WIND_VARS, config.OBS_START, config.OBS_END)
+    
+    # Convert timestamp to datetime format for easier analysis
+    all_wind_data["timestamp"] = pd.to_datetime(all_wind_data["timestamp"])
+
+    # Save to CSV and Parquet
+    all_wind_data.to_csv(os.path.join(config.OBS, config.WIND_OBS_FILE), index=False)
+    print(f"Data collectioin complete. {config.WIND_OBS_FILE} saved in {config.OBS}")
