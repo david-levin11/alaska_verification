@@ -149,13 +149,23 @@ async def fetch_wind_obs(session, base_url, stid, token, vars, start, end, outpu
                 outfile = f"{stid}_WindObs.csv"
                 file_path = os.path.join(outputdir, outfile)
 
-                if not os.path.exists(file_path):
-                    df_station.to_csv(file_path, index=False)
-                else:
+                # Check if archive exists before reading
+                if os.path.exists(file_path):
                     archive = pd.read_csv(file_path)
-                    update = pd.concat([archive, df_station]).drop_duplicates(subset=["timestamp"], inplace=True)
-                    update.to_csv(file_path, index=False)
+                    
+                    # Ensure archive has the same columns
+                    if archive.empty:
+                        update = df_station
+                    else:
+                        update = pd.concat([archive, df_station], ignore_index=True)  # Safe concat
+                    
+                    # Remove duplicates properly
+                    update.drop_duplicates(subset=["timestamp"], inplace=True)
+                else:
+                    update = df_station  # If no previous file, just use new data
 
+                # Save the updated DataFrame
+                update.to_csv(file_path, index=False)
                 print(f"Successfully saved {outfile} to {outputdir}!")
 
 async def main():
