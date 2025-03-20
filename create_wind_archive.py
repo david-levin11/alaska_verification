@@ -33,10 +33,8 @@ def create_wind_metadata(url, token, state, networks, vars, obrange):
         data = response.json()
     return data
 
-def fetch_wind_obs(base_url, stid, token, vars, start, end):
-    global all_wind_data
+def fetch_wind_obs(base_url, stid, token, vars, start, end, outputdir):
     print(f"Fetching data for station: {stid}...")
-
     # API request parameters
     params = {
         "token": token,
@@ -45,6 +43,7 @@ def fetch_wind_obs(base_url, stid, token, vars, start, end):
         "start": start,
         "end": end,
         "obtimezone": "UTC",
+        "units": "english",
         "output": "json",
     }
 
@@ -65,15 +64,29 @@ def fetch_wind_obs(base_url, stid, token, vars, start, end):
 
             # Create a DataFrame for the station
             df_station = pd.DataFrame({
-                "station_id": stid,
                 "timestamp": timestamps,
                 "wind_direction": wind_directions,
                 "wind_speed": wind_speeds,
                 "wind_gust": wind_gusts
             })
+            # converting timestamps
+            df_station["timestamp"] = pd.to_datetime(df_station["timestamp"])
+            # save dataframe
+            outfile = f"{stid}_WindObs.csv"
+            #Check to see if we already have a file and if so, append the data
+            if not os.path.exists(os.path.join(outputdir, outfile)):
+                # we don't have a file so create and save dataframe
+                df_station.to_csv(os.path.join(outputdir, outfile), index=False)
+            else:
+                #open existing file and append
+                archive = pd.read_csv(os.path.join(outputdir, outfile))
+                update = pd.concat([archive, df_station])
+                # dropping duplicate times
+                final_update = update.drop_duplicates(subset=["timestamp"])
+                #saving our updated file
+                final_update.to_csv(os.path.join(outputdir, outfile), index=False)
 
-            # Append to the main DataFrame
-            all_wind_data = pd.concat([all_wind_data, df_station], ignore_index=True)
+            print(f"Successfully saved {outfile} to {outputdir}!")
         else:
             print(f"Failed to fetch data for station {stid} (Status Code: {response.status_code})")
 
@@ -106,15 +119,9 @@ if __name__ == "__main__":
     # Load station list from CSV
     df_sites = pd.read_csv(os.path.join(config.OBS, config.METADATA))  
     station_ids = df_sites["stid"].dropna().tolist()
-    # Initialize an empty DataFrame to store results
-    all_wind_data = pd.DataFrame()
+    
     # fetching obs
     for stid in station_ids:
-        fetch_wind_obs(config.TIMESERIES_URL, stid, config.API_KEY, config.WIND_VARS, config.OBS_START, config.OBS_END)
-    
-    # Convert timestamp to datetime format for easier analysis
-    all_wind_data["timestamp"] = pd.to_datetime(all_wind_data["timestamp"])
-
-    # Save to CSV and Parquet
-    all_wind_data.to_csv(os.path.join(config.OBS, config.WIND_OBS_FILE), index=False)
-    print(f"Data collectioin complete. {config.WIND_OBS_FILE} saved in {config.OBS}")
+        if stid == "PANC":
+            fetch_wind_obs(config.TIMESERIES_URL, stid, config.API_KEY, config.WIND_VARS, config.OBS_START, config.OBS_END, config.OBS)
+    print("Data collection complete!")
