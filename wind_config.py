@@ -28,7 +28,7 @@ STATE = "ak"
 
 WIND_VARS = "wind_direction,wind_speed,wind_gust"
 
-NETWORK = 
+NETWORK = "1,107,90,179,200,286,3004"
 
 OBS_START = "202501010000"
 
