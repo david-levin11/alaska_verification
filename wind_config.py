@@ -34,8 +34,25 @@ OBS_START = "202501021800"
 
 OBS_END = "202501031800"
 
+################### Model Params ###################################
 
+HERBIE_MODELS = ['hrrrak','nbm','urma_ak','rtma_ak','gfs']
 
+HERBIE_PRODUCTS = {'nbm':'ak',
+			'gfs':'pgrb2.0p25',
+			'hrrrak':'sfc',
+			'rtma_ak':'ges',
+			'urma_ak':'ges'
+			}
 
+HERBIE_FORECASTS = {
+		'nbm':[24,48,72,96],
+		'gfs':[24,48,72,96],
+		'hrrrak':[12,24,36],
+		'rtma_ak':[0],  # hourly run, no fcsts, just analysis
+		'urma_ak':[0],  # same as rtma, no fcsts, just analysis
+		}
+
+HERBIE_CYCLES = {"nbm": "3h", "hrrrak": "3h", "urma_ak": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
 
