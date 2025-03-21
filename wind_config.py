@@ -6,6 +6,8 @@ HOME = os.path.abspath(os.path.dirname(__file__))
 
 OBS = os.path.join(HOME, 'obs')
 
+MODEL_DIR = os.path.join(HOME, 'model')
+
 TMP = os.path.join(HOME, 'tmp')
 
 ######################## File Names #################################
