@@ -70,61 +70,112 @@ def get_model(model,dates,stns):
         else:
             H=FastHerbie(rdates,model=model,fxx=[fcst],
                 product=products[model],priority=['aws'])
-        if model=='nbm':
-            ds1=H.xarray(':WIND:10 m above',remove_grib=False)
-            ds2=H.xarray(':WDIR:10 m above',remove_grib=False)
-            ds3=H.xarray(':GUST:',remove_grib=False)
-            ds=xr.merge([ds1,ds2,ds3])
-        else:
-            ds1=H.xarray(':[UV]GRD:10 m above',remove_grib=False).herbie.with_wind()
-            ds2=H.xarray(':GUST:',remove_grib=False)
-            ds=xr.merge([ds1,ds2])
-            ds=ds.drop_vars(['u10','v10'])
+        if config.ELEMENT == "Wind":
+            varlist = config.HERBIE_XARRAY_STRINGS[config.ELEMENT][model]
+            if model=='nbm':
+                ds1=H.xarray(varlist[0],remove_grib=False)
+                ds2=H.xarray(varlist[1],remove_grib=False)
+                ds3=H.xarray(varlist[2],remove_grib=False)
+                ds=xr.merge([ds1,ds2,ds3])
+            else:
+                ds1=H.xarray(varlist[0],remove_grib=False).herbie.with_wind()
+                ds2=H.xarray(varlist[1],remove_grib=False)
+                ds=xr.merge([ds1,ds2])
+                ds=ds.drop_vars(['u10','v10'])
         pts = ds.herbie.pick_points(stns,method='weighted',tree_name=f'{model}_tree',use_cached_tree=True)	
         if 'k' in pts.dims:
             pts=pts.drop_dims('k')
         all_dates.append(pts)
 
     all_dates=xr.combine_nested(all_dates,concat_dim='time')
-    
-
     return all_dates
 
-def create_dataframe_netcdf(ncfile):
+
+def append_to_netcdf(new_ds, output_path, time_dim="time"):
+    """
+    Appends new data along the time dimension to an existing NetCDF file.
+    Avoids duplicate time steps using precise timestamp matching.
+    """
+    if os.path.exists(output_path):
+        print(f"Existing NetCDF found: {output_path}. Merging new data...")
+
+        existing_ds = xr.open_dataset(output_path, decode_timedelta=True)
+
+        # Normalize time values for robust comparison
+        existing_times = pd.to_datetime(existing_ds[time_dim].values).astype(str)
+        #print(f"Existing times are: {existing_times}")
+        new_times = pd.to_datetime(new_ds[time_dim].values).astype(str)
+        #print(f"New times are: {new_times}")
+        # Find times in new_ds that are NOT in existing_ds
+        mask = ~pd.Series(new_times).isin(existing_times)
+        new_unique_times = new_ds[time_dim].values[mask.values]
+        #print(f"New unique times are: {new_unique_times}")
+        if len(new_unique_times) == 0:
+            print("No new time steps to append.")
+            return
+
+        filtered_new_ds = new_ds.sel({time_dim: new_unique_times})
+        combined_ds = xr.concat([existing_ds, filtered_new_ds], dim=time_dim)
+        #combined_ds = combined_ds.sortby(time_dim)
+
+        # Save updated dataset
+        combined_ds.to_netcdf(output_path, mode="w")
+        print(f"Appended {len(new_unique_times)} new time steps to {output_path}")
+    else:
+        print(f"Saving new dataset to {output_path}")
+        new_ds.to_netcdf(output_path)
+
+def create_dataframe_fm_netcdf(ncfile, outputdir):
+    global config
     with xr.open_dataset(ncfile, decode_timedelta=True) as ds:
         #ds = ds.sortby("time")
         # Loop through each point
         stid_list = ds.point_stid.values
-        dfs = {}
-
+        print(ds)
         for i, stid in enumerate(stid_list):
-            if stid == "RIXA2":
-                # Extract si10 series for this point across time
-                si10_series = ds.si10[:, i].to_pandas()
-                if model == "nbm":
+            if stid == 'RIXA2':
+                # Extract weather element series for this point across time
+                # Code for extracting variable is contingent upon model and variable and should be 
+                # defined in the config file
+                if config.MODEL == "nbm" and config.ELEMENT == 'Wind':
+                    spd_var = config.ELEMENT_DICT[config.ELEMENT][config.MODEL][0]
+                    dir_var = config.ELEMENT_DICT[config.ELEMENT][config.MODEL][1]
+                    spd_series = ds[spd_var][:, i].to_pandas()
+                    dir_series = ds[dir_var][:, i].to_pandas()
                     # convert to kts
-                    si10 = si10_series.values*1.94384
+                    spd_element = spd_series.values*1.94384
+                    dir_element = round(dir_series,0)
+                    # Add step and valid_time for each row (aligned by time)
+                    df = pd.DataFrame({
+                        spd_var: spd_element,
+                        dir_var: dir_element,
+                        'valid_time': ds.valid_time.values,
+                        'step': ds.step.values
+                    })
+                    print(df)
+                    df['step_hr'] = df['step'].dt.total_seconds() // 3600  # convert timedelta to hours
+                    pivot = df.pivot(index='valid_time', columns='step_hr', values=[spd_var,dir_var])
+                    # Flatten and rename columns
+                    pivot.columns = [
+                        f"{int(step)}hr {'Speed' if var == spd_var else 'Direction'} Forecast"
+                        for var, step in pivot.columns
+                    ]
+
+                    pivot = pivot.reset_index()
                 else:
-                    si10 = si10_series.values
-                # Add step and valid_time for each row (aligned by time)
-                df = pd.DataFrame({
-                    'si10': si10,
-                    'valid_time': ds.valid_time.values,
-                    'step': ds.step.values
-                })
-                print(df)
-                # Pivot: rows = valid_time, columns = step (in hours), values = si10
-                df['step_hr'] = df['step'].dt.total_seconds() // 3600  # convert timedelta to hours
-                pivot = df.pivot(index='valid_time', columns='step_hr', values='si10')
-                # Rename columns to be more readable
-                pivot.columns = [f"{int(c)}hr Forecast" for c in pivot.columns]
-                pivot = pivot.reset_index()
+                    print(f"Haven't set up config for extracting {config.ELEMENT} from {config.MODEL}.")
+                    continue
+                
                 print(pivot)
-                # TO-DO:  Save these dataframes in appropriate model directory and add update/append functionality
+                # saving as .csv
+                outfile = f'{stid.lower()}_{config.MODEL}_forecasts.csv'
+                pivot.to_csv(os.path.join(outputdir, outfile), index=False)
+                print(f'Saved {outfile} in {outputdir}')
+            # TO-DO:  Save these dataframes in appropriate model directory and add update/append functionality
         
 
 
-model = "nbm"
+model = config.MODEL
 
 if __name__ == "__main__":
     if not os.path.exists(os.path.join(config.OBS, config.METADATA)):
@@ -137,31 +188,33 @@ if __name__ == "__main__":
         meta_df.to_csv(os.path.join(config.OBS, config.METADATA), index=False)
         print(f"All done creating metadata.  Saved {config.METADATA} in {config.OBS}.")
     
-    # # grabbing wind archive at our synoptic metadata sites
-    # # Load station list from CSV
-    # df_sites = pd.read_csv(os.path.join(config.OBS, config.METADATA))  
-    # station_points = df_sites[["stid", "latitude", "longitude"]].dropna()
-    # print(station_points.head(5))
-    # cycle=config.HERBIE_CYCLES[model]
-    # #end = pd.Timestamp('now').floor("12h") - pd.Timedelta("24h")
-    # end = pd.Timestamp(config.OBS_END)
-    # print(f'End time is: {end}')
-    # #start=end-pd.Timedelta('7d')
-    # start = pd.Timestamp(config.OBS_START)
-    # print(f'Start time is: {start}')
-    # dates=pd.date_range(start,end,freq=cycle)
-    # print(f'Date range is: {dates}')
+    # grabbing wind archive at our synoptic metadata sites
+    # Load station list from CSV
+    df_sites = pd.read_csv(os.path.join(config.OBS, config.METADATA))  
+    station_points = df_sites[["stid", "latitude", "longitude"]].dropna()
+    print(station_points.head(5))
+    cycle=config.HERBIE_CYCLES[model]
+    #end = pd.Timestamp('now').floor("12h") - pd.Timedelta("24h")
+    end = pd.Timestamp(config.OBS_END)
+    print(f'End time is: {end}')
+    #start=end-pd.Timedelta('7d')
+    start = pd.Timestamp(config.OBS_START)
+    print(f'Start time is: {start}')
+    dates=pd.date_range(start,end,freq=cycle)
+    print(f'Date range is: {dates}')
 
-    # # getting our archive by model
-    # model_data = get_model(model, dates, station_points)
-    # #making sure we have a model directory
-    # ensure_dir(config.MODEL_DIR)
-    # # creating a directory for our particular model if we haven't already
-    # ensure_dir(os.path.join(config.MODEL_DIR, model))
+    # getting our archive by model
+    model_data = get_model(model, dates, station_points)
+    #making sure we have a model directory
+    ensure_dir(config.MODEL_DIR)
+    # creating a directory for our particular model if we haven't already
+    ensure_dir(os.path.join(config.MODEL_DIR, model))
     raw_output_file = f"{model}_archive_latest.nc"
+    raw_output_loc = os.path.join(os.path.join(config.MODEL_DIR, model), raw_output_file)
+    append_to_netcdf(model_data, raw_output_loc)
     # # saving our model data as netcdf
     # model_data.to_netcdf(os.path.join(os.path.join(config.MODEL_DIR, model), raw_output_file))
-    # print(f"Saved raw {model} data to {os.path.join(os.path.join(config.MODEL_DIR, model), raw_output_file)}")
+    print(f"Saved raw {model} data to {os.path.join(os.path.join(config.MODEL_DIR, model), raw_output_file)}")
     
     # Now creating our dataframes for archive purposes
-    create_dataframe_netcdf(os.path.join(os.path.join(config.MODEL_DIR, model), raw_output_file))
+    create_dataframe_fm_netcdf(raw_output_loc, os.path.join(os.path.join(config.MODEL_DIR, model)))

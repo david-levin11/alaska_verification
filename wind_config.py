@@ -1,5 +1,8 @@
 import os
 
+######################### Wx Elements ################################
+ELEMENT = 'Wind'
+
 ######################### Directories #################################
 
 HOME = os.path.abspath(os.path.dirname(__file__))
@@ -14,9 +17,9 @@ TMP = os.path.join(HOME, 'tmp')
 
 METADATA = "alaska_obs_metadata.csv"
 
-WIND_OBS_FILE = "alaska_wind_obs.csv"
+WIND_OBS_FILE = f"alaska_{ELEMENT.lower()}_obs.csv"
 
-WIND_OBS_FILE_COMPRESSED = "alaska_wind_obs.parquet"
+WIND_OBS_FILE_COMPRESSED = f"alaska_{ELEMENT.lower()}_obs.parquet"
 
 
 ###################### Synoptic Params ##########################
@@ -28,7 +31,8 @@ METADATA_URL = "https://api.synopticdata.com/v2/stations/metadata"
 
 STATE = "ak"
 
-WIND_VARS = "wind_direction,wind_speed,wind_gust"
+if ELEMENT == "Wind":
+	WIND_VARS = "wind_direction,wind_speed,wind_gust"
 
 NETWORK = "1,107,90,179,200,286,3004"
 
@@ -37,6 +41,7 @@ OBS_START = "202501021800"
 OBS_END = "202501031800"
 
 ################### Model Params ###################################
+MODEL = 'nbm'
 
 HERBIE_MODELS = ['hrrrak','nbm','urma_ak','rtma_ak','gfs']
 
@@ -56,5 +61,10 @@ HERBIE_FORECASTS = {
 		}
 
 HERBIE_CYCLES = {"nbm": "3h", "hrrrak": "3h", "urma_ak": "3h", "gfs": "6h", "rtma_ak": "3h"}
+
+ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10']}}
+
+HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:'],
+								   'hrrrak': [':[UV]GRD:10 m above',':GUST:']}}
 
 
