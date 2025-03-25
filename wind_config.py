@@ -39,6 +39,10 @@ NETWORK = "1,107,90,179,200,286,3004"
 OBS_START = "202501021800"
 
 OBS_END = "202501031800"
+# Start with 1 second and back off
+INITIAL_WAIT = 1
+# Number of retry attempts
+MAX_RETRIES = 5
 
 ################### Model Params ###################################
 MODEL = 'nbm'
