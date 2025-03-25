@@ -117,7 +117,10 @@ def fetch_wind_obs_multiprocess(stid):
         "output": "json",
     }
     
-    response = requests.get(base_url, params=params)
+    response = fetch_with_retries(base_url, params)
+    if response is None:
+        print(f"❌ Failed to fetch data for station {stid} after retries.")
+        return  # Exit early
 
     if response.status_code == 200:
         data = response.json()
@@ -159,8 +162,25 @@ def fetch_wind_obs_multiprocess(stid):
         else:
             print(f"Failed to fetch data for station {stid} (Status Code: {response.status_code})")
 
-        # Respect API rate limits
-        time.sleep(1)
+        
+def fetch_with_retries(url, params):
+    global config
+    for attempt in range(1, config.MAX_RETRIES + 1):
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            if response.status_code == 200:
+                return response
+            else:
+                print(f"⚠️ Attempt {attempt}: Received status {response.status_code}")
+        except requests.RequestException as e:
+            print(f"⚠️ Attempt {attempt}: Request error: {e}")
+
+        wait_time = config.INITIAL_WAIT * attempt
+        print(f"⏳ Waiting {wait_time} seconds before retry...")
+        time.sleep(wait_time)
+
+    print("❌ Max retries exceeded.")
+    return None
 
 
 def parse_metadata(data):
@@ -181,7 +201,7 @@ def melt_forecast_csv(file_path, stid):
     # Extract step and variable name from column
     long_df["variable"] = long_df["column"].str.extract(r"(speed|direction|gust)", expand=False).str.lower()
     long_df["stid"] = stid
-    long_df = long_df[["stid", "valid_time", "step_hr", "variable", "value"]]
+    long_df = long_df[["stid", "timestamp", "variable", "value"]]
 
     return long_df
         
@@ -192,7 +212,13 @@ def build_parquet_archive(input_dir, output_file):
         ignore_index=True
     )
     df_all.to_parquet(output_file, index=False)
-    print(f"✅ Saved combined forecast archive to {output_file}")
+    print(f"✅ Saved combined obs archive to {output_file}")
+
+def remove_files(dir, wild_card):
+    all_files = glob(os.path.join(dir, wild_card))
+    for f in all_files:
+        os.remove(os.path.join(dir, f))
+        print(f'Done removing {f} from {dir}')
 
 if __name__ == "__main__":
     if not os.path.exists(os.path.join(config.OBS, config.METADATA)):
@@ -213,12 +239,13 @@ if __name__ == "__main__":
     with concurrent.futures.ProcessPoolExecutor() as executor:
         for number, stid in zip(station_ids, executor.map(fetch_wind_obs_multiprocess, station_ids)):
             print(f'Fetching obs for {number}')
-    # # fetching obs
-    # for stid in station_ids:
-    #     if stid == "PANC":
-    #         fetch_wind_obs(config.TIMESERIES_URL, stid, config.API_KEY, config.WIND_VARS, config.OBS_START, config.OBS_END, config.OBS)
     print("Data collection complete!")
     # Now concatenating and creating our parquet file for DuckDB
     # Now creating our database file
     output_parquet = os.path.join(config.OBS, f"alaska_{config.ELEMENT.lower()}_obs.parquet")
+    print(f"Building archive {output_parquet}")
     build_parquet_archive(config.OBS, output_parquet)
+    print(f"Archive complete! Check {output_parquet} for data.")
+    # removing temporary .csv files
+    remove_files(config.OBS, f"*{config.ELEMENT}Obs.csv")
+    

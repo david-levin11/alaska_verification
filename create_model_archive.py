@@ -254,3 +254,7 @@ if __name__ == "__main__":
     # Now creating our database file
     output_parquet = os.path.join(raw_output_dir, f"alaska_{model}_{config.ELEMENT.lower()}_forecasts.parquet")
     build_parquet_archive(raw_output_dir, output_parquet)
+
+
+#TODO Need to look at removing extaneous .csv files or creating parquest directly from .netcdf
+#TODO Add database functionality for obs as well (parquet, DuckDB)
