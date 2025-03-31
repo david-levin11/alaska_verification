@@ -72,7 +72,7 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
 								   'hrrrak': [':[UV]GRD:10 m above',':GUST:']}}
 
 ########################## NDFD Params #################################
-
+NDFD_DIR = 'ndfd'
 
 NDFD_DICT = {"Wind": {"wspd": ["YCRZ98", "YCRZ97"], "wdir": ["YBRZ98", "YBRZ97"]}}
 
