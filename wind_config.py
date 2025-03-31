@@ -71,4 +71,21 @@ ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10']}}
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:'],
 								   'hrrrak': [':[UV]GRD:10 m above',':GUST:']}}
 
+########################## NDFD Params #################################
+
+
+NDFD_DICT = {"Wind": {"wspd": ["YCRZ98", "YCRZ97"], "wdir": ["YBRZ98", "YBRZ97"]}}
+
+NDFD_SPEED_STRING = "YCRZ98"
+
+NDFD_DIR_STRING = "YBRZ98"
+
+NDFD_SPEED_STRING_EXT = "YCRZ97"
+
+NDFD_DIR_STRING_EXT = "YBRZ97"
+
+NDFD_FILE_STRINGS = {"Wind": ["wspd", "wdir", "wgust"]}
+
+NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10", "ifg10"]}
+
 
