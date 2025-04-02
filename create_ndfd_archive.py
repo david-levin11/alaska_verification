@@ -1,20 +1,22 @@
 import os
+import io
+import shutil
 import requests
 import fsspec
-import duckdb
 import xarray as xr
 import pandas as pd
 import numpy as np
 import pyarrow.parquet as pq
 import pyarrow as pa
+import pyarrow.fs as pafs
 from collections import defaultdict
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import wind_config as config
-from dotenv import load_dotenv
 
-# set up envirionment vars
-load_dotenv()
+# setting temp storage
+os.environ["TMPDIR"] = config.TMP
 
 #Initializing our station iy, ix values from ndfd
 station_index_cache = {}
@@ -73,11 +75,12 @@ def extract_timestamp(filename):
 
 
 def get_ndfd_file_list(start, end, element_dict, element_type="Wind"):
+    global config
     """
     Return filtered S3 GRIB file paths for both Speed and Direction wind forecasts from NDFD.
     """
     # Ensure temp cache dir exists
-    tmp = "tmp"
+    tmp = config.TMP
     ensure_dir(tmp)
 
     # Construct date range for forecast run times
@@ -116,7 +119,9 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
     records = []
     try:
         speed_url = f'simplecache::s3://{speed_file}'
+        #speed_url = f'simplecache::s3://{speed_file}?cache_storage={tmp_dir}'
         dir_url = f'simplecache::s3://{dir_file}' if dir_file else None
+        #dir_url = f'simplecache::s3://{dir_file}?cache_storage={tmp_dir}' if dir_file else None
 
         with fsspec.open(speed_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_speed:
             ds_speed = xr.open_dataset(f_speed.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
@@ -177,8 +182,7 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
         print(f"❌ Failed to process {speed_file} + {dir_file}: {e}")
     return pd.DataFrame.from_records(records)
 
-def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tmp_dir="tmp"):
-    ensure_dir(tmp_dir)
+def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tmp_dir=config.TMP):
     element_keys = config.NDFD_ELEMENT_STRINGS[config.ELEMENT]
 
     speed_with_time = sorted([(f, extract_timestamp(f)) for f in speed_files], key=lambda x: x[1])
@@ -208,72 +212,126 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
     return df_combined
 
 
-def append_to_parquet_duckdb(df_new, parquet_path, unique_keys=["station_id", "init_time", "forecast_hour", "valid_time"]):
-    if not os.path.exists(parquet_path):
-        df_new.to_parquet(parquet_path, index=False)
-        print(f"🆕 Created new parquet file at {parquet_path}")
-    else:
-        con = duckdb.connect()
-        con.execute("INSTALL parquet; LOAD parquet;")
-        
-        # Load existing data
-        df_existing = con.execute(f"SELECT * FROM read_parquet('{parquet_path}')").df()
 
-        # Combine and deduplicate
-        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
-        df_combined = df_combined.drop_duplicates(subset=unique_keys)
-
-        # Save updated dataset
-        df_combined.to_parquet(parquet_path, index=False)
-        print(f"✅ Appended data to {parquet_path} (deduplicated on {unique_keys})")
-
-def upload_parquet_to_s3(df, s3_path, region="us-east-2"):
-    aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-
-    if not aws_access_key or not aws_secret_key:
-        raise ValueError("Missing AWS credentials in environment variables")
-
+def write_partitioned_parquet(df, s3_uri, partition_cols):
     try:
-        fs = fsspec.filesystem(
-            "s3",
-            key=aws_access_key,
-            secret=aws_secret_key,
-            client_kwargs={"region_name": region}
+        # Add partition columns
+        df["year"] = df["valid_time"].dt.year
+        df["month"] = df["valid_time"].dt.month
+
+        # Parse bucket and key prefix from s3_uri
+        if not s3_uri.startswith("s3://"):
+            raise ValueError("s3_uri must start with 's3://'")
+
+        # Split into bucket and prefix
+        s3_path = s3_uri.replace("s3://", "")
+        bucket, *key_parts = s3_path.split("/")
+        key_prefix = "/".join(key_parts).rstrip("/")
+
+        # Set up S3 filesystem with the correct bucket
+        s3 = pafs.S3FileSystem(region="us-east-2")
+
+        # Build full path within the bucket
+        full_path = f"{bucket}/{key_prefix}" if key_prefix else bucket
+
+        # Write Parquet to S3 in partitioned folders
+        table = pa.Table.from_pandas(df)
+        pq.write_to_dataset(
+            table,
+            root_path=full_path,
+            partition_cols=partition_cols,
+            filesystem=s3
         )
-        with fs.open(s3_path, "wb") as f:
-            df.to_parquet(f, index=False)
-        print(f"✅ Successfully uploaded to {s3_path}")
+
+        print(f"✅ Successfully wrote partitioned parquet to s3://{full_path}")
+
     except Exception as e:
-        print(f"❌ Failed to upload to {s3_path}: {e}")
+        print(f"❌ Failed to write partitioned parquet: {e}")
+
+def append_to_parquet_s3(
+    df_new,
+    s3_parquet_path,
+    region="us-east-2",
+    unique_keys=["station_id", "forecast_hour", "valid_time"]
+):
+    try:
+        fs = fsspec.filesystem("s3", profile="default", client_kwargs={"region_name": region})
+
+        # If the file exists, read it from S3
+        if fs.exists(s3_parquet_path):
+            print(f"📥 Reading existing Parquet from {s3_parquet_path}")
+            with fs.open(s3_parquet_path, "rb") as f:
+                df_existing = pd.read_parquet(f)
+            print(f"📊 Existing records: {len(df_existing)}")
+
+            # Combine and deduplicate
+            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+            df_combined = df_combined.drop_duplicates(subset=unique_keys)
+            print(f"🧹 Combined and deduplicated to {len(df_combined)} records")
+        else:
+            print(f"🆕 No existing Parquet found. Creating new one at {s3_parquet_path}")
+            df_combined = df_new
+
+        # Write the combined DataFrame back to S3
+        with fs.open(s3_parquet_path, "wb") as f:
+            df_combined.to_parquet(f, index=False)
+        print(f"✅ Successfully wrote to {s3_parquet_path}")
+
+    except Exception as e:
+        print(f"❌ Failed to update parquet at {s3_parquet_path}: {e}")
 
 if __name__ == "__main__":
+    # ensuring tmp storage
+    os.makedirs(config.TMP, exist_ok=True)
+    print(f"Temp cache is: {config.TMP}")
+    if not os.path.exists(os.path.join(config.OBS, config.METADATA)):
+        print(f"Couldn't find {config.METADATA} in {config.OBS}...will need to create the file")
+        ensure_dir(config.OBS)
+        print(f'Creating metadata file from {config.METADATA_URL}')
+        meta_json = create_wind_metadata(config.METADATA_URL, config.API_KEY, config.STATE, config.NETWORK, config.WIND_VARS, config.OBS_START)
+        meta_df = parse_metadata(meta_json)
+        meta_df.to_csv(os.path.join(config.OBS, config.METADATA), index=False)
+        print(f"All done creating metadata. Saved {config.METADATA} in {config.OBS}.")
 
-    # if not os.path.exists(os.path.join(config.OBS, config.METADATA)):
-    #     print(f"Couldn't find {config.METADATA} in {config.OBS}...will need to create the file")
-    #     ensure_dir(config.OBS)
-    #     print(f'Creating metadata file from {config.METADATA_URL}')
-    #     meta_json = create_wind_metadata(config.METADATA_URL, config.API_KEY, config.STATE, config.NETWORK, config.WIND_VARS, config.OBS_START)
-    #     meta_df = parse_metadata(meta_json)
-    #     meta_df.to_csv(os.path.join(config.OBS, config.METADATA), index=False)
-    #     print(f"All done creating metadata. Saved {config.METADATA} in {config.OBS}.")
+    station_df = pd.read_csv(os.path.join(config.OBS, config.METADATA))
+    speed_key, dir_key, gust_key = config.NDFD_FILE_STRINGS[config.ELEMENT]
+    parquet_file = f"alaska_ndfd_{config.ELEMENT.lower()}_forecasts.parquet"
+    #s3_output_path = f"{config.NDFD_S3_URL}{os.path.basename(parquet_file)}"
 
-    # station_df = pd.read_csv(os.path.join(config.OBS, config.METADATA))
+    # Handle in monthly chunks
+    start = pd.to_datetime(config.OBS_START)
+    end = pd.to_datetime(config.OBS_END)
+    current = start
+    while current <= end:
+        chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+        if chunk_end > end:
+            chunk_end = end
 
-    # # Get list of speed and direction files
-    # filtered_files = get_ndfd_file_list(config.OBS_START, config.OBS_END, config.NDFD_DICT)
-    # speed_key, dir_key, gust_key = config.NDFD_FILE_STRINGS[config.ELEMENT]
-    # speed_files = filtered_files[speed_key]
-    # direction_files = filtered_files.get(dir_key, [])  # Safe fallback for scalar elements
+        print(f"🗂️ Processing chunk: {current} to {chunk_end}")
 
-    # # Use the parallel extraction function
-    # df_ndfd = extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df)
-    # #print(df_ndfd.head())
-    # # Save to Parquet with deduplication on init + valid time
-    parquet_dir = os.path.join(config.MODEL_DIR, config.NDFD_DIR)
-    # ensure_dir(parquet_dir)
-    parquet_file = os.path.join(parquet_dir, f"alaska_ndfd_{config.ELEMENT.lower()}_forecasts.parquet")
-    # append_to_parquet_duckdb(df_ndfd, parquet_file)
-    # uploading to my S3 bucket
-    s3_output_path = f"{config.NDFD_S3_URL}{os.path.basename(parquet_file)}"
-    upload_parquet_to_s3(pd.read_parquet(parquet_file), s3_output_path)
+        filtered_files = get_ndfd_file_list(current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"), config.NDFD_DICT)
+        speed_files = filtered_files[speed_key]
+        direction_files = filtered_files.get(dir_key, [])
+
+        if not speed_files:
+            print(f"⚠️ No data for chunk {current} to {chunk_end} — skipping.")
+        else:
+            df_ndfd = extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df)
+            if config.USE_MASTER_PARQUET:
+                # Read the existing Parquet (if it exists), merge, and write back
+                s3_master_path = f"{config.NDFD_S3_URL}alaska_ndfd_{config.ELEMENT.lower()}_forecasts_master.parquet"
+                append_to_parquet_s3(df_ndfd, s3_master_path)
+            else:
+                # Partitioned write (current logic)
+                write_partitioned_parquet(df_ndfd, config.NDFD_S3_URL, partition_cols=["year", "month"])
+
+        # 🔁 Clean up and recreate the cache dir
+        shutil.rmtree(config.TMP, ignore_errors=True)
+        os.makedirs(config.TMP)
+
+        current += relativedelta(months=1)
+
+## TODO Test master parquet functionality again now that the memory issue has been solved.
+## TODO Test temporary local files rather than in-memory operations
+## TODO Test saving parquet locally rather than S3 with an option for cloud storage in config
+## TODO Work on functionality for model archive (NBM) and observation archive

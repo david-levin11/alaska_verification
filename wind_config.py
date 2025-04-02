@@ -1,5 +1,7 @@
 import os
 
+
+USE_MASTER_PARQUET = False # Set to True to enable master parquet logic
 ######################### Wx Elements ################################
 ELEMENT = 'Wind'
 
@@ -11,7 +13,7 @@ OBS = os.path.join(HOME, 'obs')
 
 MODEL_DIR = os.path.join(HOME, 'model')
 
-TMP = os.path.join(HOME, 'tmp')
+TMP = os.path.join(HOME, 'tmp_cache')
 
 ######################## File Names #################################
 
