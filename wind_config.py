@@ -36,9 +36,9 @@ if ELEMENT == "Wind":
 
 NETWORK = "1,107,90,179,200,286,3004"
 
-OBS_START = "202501021800"
+OBS_START = "202101010000"
 
-OBS_END = "202501031800"
+OBS_END = "202201010000"
 # Start with 1 second and back off
 INITIAL_WAIT = 1
 # Number of retry attempts
@@ -88,4 +88,8 @@ NDFD_FILE_STRINGS = {"Wind": ["wspd", "wdir", "wgust"]}
 
 NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10", "ifg10"]}
 
+NDFD_S3_URL = "s3://alaska-verification/ndfd/"
+
+
+##################### AWS Params #################################
 

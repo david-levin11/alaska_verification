@@ -5,10 +5,19 @@ import duckdb
 import xarray as xr
 import pandas as pd
 import numpy as np
+import pyarrow.parquet as pq
+import pyarrow as pa
 from collections import defaultdict
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import wind_config as config
+from dotenv import load_dotenv
+
+# set up envirionment vars
+load_dotenv()
+
+#Initializing our station iy, ix values from ndfd
+station_index_cache = {}
 
 def ensure_dir(directory):
     """Ensure a directory exists. If not, create it."""
@@ -123,8 +132,8 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
         steps = pd.to_timedelta(ds_speed.step.values)
         valid_times = pd.to_datetime(ds_speed.valid_time.values)
 
-        if len(element_keys) == 2:
-            spd_key, dir_key = element_keys
+        if len(element_keys) > 1:
+            spd_key, dir_key, gust_key = element_keys
             speed_array = ds_speed[spd_key].values
             dir_array = ds_dir[dir_key].values if ds_dir else None
         else:
@@ -136,7 +145,13 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
             stid = row["stid"]
             lat = row["latitude"]
             lon = row["longitude"]
-            iy, ix = ll_to_index(lat, lon, lats, lons)
+
+            if stid in station_index_cache:
+                iy, ix = station_index_cache[stid]
+            else:
+                iy, ix = ll_to_index(lat, lon, lats, lons)
+                station_index_cache[stid] = (iy, ix)
+            
             spd_values = speed_array[:, iy, ix]
             dir_values = dir_array[:, iy, ix] if dir_array is not None else [None] * len(spd_values)
 
@@ -166,104 +181,34 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
     ensure_dir(tmp_dir)
     element_keys = config.NDFD_ELEMENT_STRINGS[config.ELEMENT]
 
-    dir_map = {extract_timestamp(f): f for f in direction_files}
+    speed_with_time = sorted([(f, extract_timestamp(f)) for f in speed_files], key=lambda x: x[1])
+    dir_with_time = sorted([(f, extract_timestamp(f)) for f in direction_files], key=lambda x: x[1])
     matched_pairs = []
-    for speed_file in speed_files:
-        stime = extract_timestamp(speed_file)
-        if len(element_keys) == 2:
-            match = min(direction_files, key=lambda f: abs(extract_timestamp(f) - stime))
-            if abs(extract_timestamp(match) - stime) <= pd.Timedelta("1 minute"):
-                matched_pairs.append((speed_file, match))
+    for speed_file, speed_time in speed_with_time:
+        if len(element_keys) > 1:
+            closest_match = None
+            min_diff = pd.Timedelta("2 minutes")
+            for dir_file, dir_time in dir_with_time:
+                diff = abs(dir_time - speed_time)
+                if diff <= min_diff:
+                    closest_match = dir_file
+                    min_diff = diff
+            matched_pairs.append((speed_file, closest_match))
         else:
             matched_pairs.append((speed_file, None))
 
     print(f"🔄 Matched {len(matched_pairs)} file pairs.")
-
     results = []
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(process_file_pair, s, d, station_df, tmp_dir, element_keys) for s, d in matched_pairs]
-        for future in as_completed(futures):
+        for i, future in enumerate(as_completed(futures), 1):
             results.append(future.result())
-
+            print(f"✅ Completed {i}/{len(matched_pairs)} file pairs.")
     df_combined = pd.concat(results, ignore_index=True)
     return df_combined
 
-def extract_ndfd_forecasts(speed_files, direction_files, station_df, element, paired=True, tmp_dir="tmp"):
-    global config
-    ensure_dir(tmp_dir)
-    records = []
-    speed_var = config.NDFD_ELEMENT_STRINGS[element][0]
-    dir_var = config.NDFD_ELEMENT_STRINGS[element][1] if paired else None
-    dir_files_with_time = [(f, extract_timestamp(f)) for f in direction_files] if paired else []
-
-    for speed_file in speed_files:
-        speed_time = extract_timestamp(speed_file)
-        best_match = None
-        smallest_diff = pd.Timedelta("2 minutes")
-
-        if paired:
-            for dir_file, dir_time in dir_files_with_time:
-                time_diff = abs(speed_time - dir_time)
-                if time_diff <= pd.Timedelta("1 minute") and time_diff < smallest_diff:
-                    smallest_diff = time_diff
-                    best_match = dir_file
-            if not best_match:
-                print(f"⚠️ No direction match within 1 minute for {speed_file}")
-                continue
-
-        speed_url = f'simplecache::s3://{speed_file}'
-        dir_url = f'simplecache::s3://{best_match}' if paired else None
-        print(f"📦 Processing speed: {speed_url}")
-        if paired:
-            print(f"📦 Processing direction: {dir_url}")
-
-        try:
-            with fsspec.open(speed_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_speed:
-                ds_speed = xr.open_dataset(f_speed.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
-
-            if paired:
-                with fsspec.open(dir_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_dir:
-                    ds_dir = xr.open_dataset(f_dir.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
-            init_time = pd.to_datetime(ds_speed.time.values)
-            #print(f"Initial time is: {init_time}")
-            lats = ds_speed.latitude.values
-            lons = ds_speed.longitude.values - 360
-            steps = pd.to_timedelta(ds_speed.step.values)
-            valid_times = pd.to_datetime(ds_speed.valid_time.values)
-            speed_array = ds_speed[speed_var].values
-            dir_array = ds_dir[dir_var].values if paired else None
-
-            for _, row in station_df.iterrows():
-                stid = row["stid"]
-                lat = row["latitude"]
-                lon = row["longitude"]
-                iy, ix = ll_to_index(lat, lon, lats, lons)
-                spd_values = speed_array[:, iy, ix]
-                dir_values = dir_array[:, iy, ix] if paired else [None] * len(spd_values)
-
-                for step, valid_time, spd, direc in zip(steps, valid_times, spd_values, dir_values):
-                    step_hr = int(step.total_seconds() / 3600)
-                    record = {
-                        "station_id": stid,
-                        "init_time": init_time,
-                        "valid_time": valid_time,
-                        "forecast_hour": step_hr
-                    }
-                    # add additional logic here for other elements
-                    if element == "Wind":
-                        record["wind_speed_kt"] = round(float(spd * 1.94384), 2)
-                    if paired:
-                        record["wind_dir_deg"] = round(float(direc), 0)
-                    records.append(record)
-
-        except Exception as e:
-            print(f"❌ Failed to process speed file: {speed_url}\nError: {e}")
-
-    return pd.DataFrame.from_records(records)
 
 def append_to_parquet_duckdb(df_new, parquet_path, unique_keys=["station_id", "init_time", "forecast_hour", "valid_time"]):
-    import duckdb
-
     if not os.path.exists(parquet_path):
         df_new.to_parquet(parquet_path, index=False)
         print(f"🆕 Created new parquet file at {parquet_path}")
@@ -282,32 +227,53 @@ def append_to_parquet_duckdb(df_new, parquet_path, unique_keys=["station_id", "i
         df_combined.to_parquet(parquet_path, index=False)
         print(f"✅ Appended data to {parquet_path} (deduplicated on {unique_keys})")
 
+def upload_parquet_to_s3(df, s3_path, region="us-east-2"):
+    aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+
+    if not aws_access_key or not aws_secret_key:
+        raise ValueError("Missing AWS credentials in environment variables")
+
+    try:
+        fs = fsspec.filesystem(
+            "s3",
+            key=aws_access_key,
+            secret=aws_secret_key,
+            client_kwargs={"region_name": region}
+        )
+        with fs.open(s3_path, "wb") as f:
+            df.to_parquet(f, index=False)
+        print(f"✅ Successfully uploaded to {s3_path}")
+    except Exception as e:
+        print(f"❌ Failed to upload to {s3_path}: {e}")
 
 if __name__ == "__main__":
 
-    if not os.path.exists(os.path.join(config.OBS, config.METADATA)):
-        print(f"Couldn't find {config.METADATA} in {config.OBS}...will need to create the file")
-        ensure_dir(config.OBS)
-        print(f'Creating metadata file from {config.METADATA_URL}')
-        meta_json = create_wind_metadata(config.METADATA_URL, config.API_KEY, config.STATE, config.NETWORK, config.WIND_VARS, config.OBS_START)
-        meta_df = parse_metadata(meta_json)
-        meta_df.to_csv(os.path.join(config.OBS, config.METADATA), index=False)
-        print(f"All done creating metadata. Saved {config.METADATA} in {config.OBS}.")
+    # if not os.path.exists(os.path.join(config.OBS, config.METADATA)):
+    #     print(f"Couldn't find {config.METADATA} in {config.OBS}...will need to create the file")
+    #     ensure_dir(config.OBS)
+    #     print(f'Creating metadata file from {config.METADATA_URL}')
+    #     meta_json = create_wind_metadata(config.METADATA_URL, config.API_KEY, config.STATE, config.NETWORK, config.WIND_VARS, config.OBS_START)
+    #     meta_df = parse_metadata(meta_json)
+    #     meta_df.to_csv(os.path.join(config.OBS, config.METADATA), index=False)
+    #     print(f"All done creating metadata. Saved {config.METADATA} in {config.OBS}.")
 
-    station_df = pd.read_csv(os.path.join(config.OBS, config.METADATA))
+    # station_df = pd.read_csv(os.path.join(config.OBS, config.METADATA))
 
-    # Get list of speed and direction files
-    filtered_files = get_ndfd_file_list(config.OBS_START, config.OBS_END, config.NDFD_DICT)
+    # # Get list of speed and direction files
+    # filtered_files = get_ndfd_file_list(config.OBS_START, config.OBS_END, config.NDFD_DICT)
+    # speed_key, dir_key, gust_key = config.NDFD_FILE_STRINGS[config.ELEMENT]
+    # speed_files = filtered_files[speed_key]
+    # direction_files = filtered_files.get(dir_key, [])  # Safe fallback for scalar elements
 
-    speed_key, dir_key, gust_key = config.NDFD_FILE_STRINGS[config.ELEMENT]
-    speed_files = filtered_files[speed_key]
-    direction_files = filtered_files.get(dir_key, [])  # Safe fallback for scalar elements
-
-    # Use the parallel extraction function
-    df_ndfd = extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df)
-
-    # Save to Parquet with deduplication on init + valid time
+    # # Use the parallel extraction function
+    # df_ndfd = extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df)
+    # #print(df_ndfd.head())
+    # # Save to Parquet with deduplication on init + valid time
     parquet_dir = os.path.join(config.MODEL_DIR, config.NDFD_DIR)
-    ensure_dir(parquet_dir)
+    # ensure_dir(parquet_dir)
     parquet_file = os.path.join(parquet_dir, f"alaska_ndfd_{config.ELEMENT.lower()}_forecasts.parquet")
-    append_to_parquet_duckdb(df_ndfd, parquet_file)
+    # append_to_parquet_duckdb(df_ndfd, parquet_file)
+    # uploading to my S3 bucket
+    s3_output_path = f"{config.NDFD_S3_URL}{os.path.basename(parquet_file)}"
+    upload_parquet_to_s3(pd.read_parquet(parquet_file), s3_output_path)
