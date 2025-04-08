@@ -302,6 +302,7 @@ if __name__ == "__main__":
     start = pd.to_datetime(config.OBS_START)
     end = pd.to_datetime(config.OBS_END)
     current = start
+    sites = station_df["stid"].values.tolist()
     while current <= end:
         chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
         if chunk_end > end:
@@ -317,13 +318,24 @@ if __name__ == "__main__":
             print(f"⚠️ No data for chunk {current} to {chunk_end} — skipping.")
         else:
             df_ndfd = extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df)
-            if config.USE_MASTER_PARQUET:
-                # Read the existing Parquet (if it exists), merge, and write back
-                s3_master_path = f"{config.NDFD_S3_URL}alaska_ndfd_{config.ELEMENT.lower()}_forecasts_master.parquet"
-                append_to_parquet_s3(df_ndfd, s3_master_path)
-            else:
+            print(df_ndfd.head())
+            if config.USE_CLOUD_STORAGE:
                 # Partitioned write (current logic)
-                write_partitioned_parquet(df_ndfd, config.NDFD_S3_URL, partition_cols=["year", "month"])
+                 write_partitioned_parquet(df_ndfd, config.NDFD_S3_URL, partition_cols=["year", "month"])
+            else:
+                # looping through sites and saving .csv files locally
+                for site in sites:
+                    site_df = df_ndfd[df_ndfd["station_id"] == site]
+                    #print(site_df.head())
+                    site_file = os.path.join(os.path.join(config.MODEL_DIR,config.NDFD_DIR),f"{site}_ndfd_archive.csv")
+                    if os.path.exists(site_file):
+                        archive_df = pd.read_csv(site_file)
+                        append_df = pd.concat([archive_df, site_df], ignore_index=True)
+                        updated_df = append_df.drop_duplicates(subset=["valid_time", "forecast_hour"])
+                        updated_df.to_csv(site_file, index=False)
+                    else:
+                        archive_df = site_df.reset_index(drop=True)
+                        archive_df.to_csv(site_file, index=False)
 
         # 🔁 Clean up and recreate the cache dir
         shutil.rmtree(config.TMP, ignore_errors=True)
@@ -331,7 +343,4 @@ if __name__ == "__main__":
 
         current += relativedelta(months=1)
 
-## TODO Test master parquet functionality again now that the memory issue has been solved.
-## TODO Test temporary local files rather than in-memory operations
-## TODO Test saving parquet locally rather than S3 with an option for cloud storage in config
 ## TODO Work on functionality for model archive (NBM) and observation archive
