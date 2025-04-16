@@ -1,0 +1,6 @@
+.env
+model/
+tmp/
+obs/
+tmp_cache/
+__pycache__/
