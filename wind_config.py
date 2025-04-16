@@ -1,7 +1,7 @@
 import os
 
 
-USE_CLOUD_STORAGE = False # Set to true to append to S3 bucket database.  False saves site level .csv files locally
+USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
 ELEMENT = 'Wind'
 
@@ -41,7 +41,7 @@ NETWORK = "1,107,90,179,200,286,3004"
 
 OBS_START = "202101010000"
 
-OBS_END = "202101100000"
+OBS_END = "202103010000"
 # Start with 1 second and back off
 INITIAL_WAIT = 1
 # Number of retry attempts

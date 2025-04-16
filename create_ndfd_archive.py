@@ -248,6 +248,17 @@ def write_partitioned_parquet(df, s3_uri, partition_cols):
     except Exception as e:
         print(f"❌ Failed to write partitioned parquet: {e}")
 
+def write_to_s3(df, s3_parquet_path, region="us-east-2"):
+    try:
+        fs = fsspec.filesystem("s3", profile="default", client_kwargs={"region_name": region})
+        # Write the combined DataFrame back to S3
+        with fs.open(s3_parquet_path, "wb") as f:
+            df.to_parquet(f, index=False)
+        print(f"✅ Successfully wrote to {s3_parquet_path}")
+
+    except Exception as e:
+        print(f"❌ Failed to update parquet at {s3_parquet_path}: {e}")
+
 def append_to_parquet_s3(
     df_new,
     s3_parquet_path,
@@ -321,7 +332,9 @@ if __name__ == "__main__":
             print(df_ndfd.head())
             if config.USE_CLOUD_STORAGE:
                 # Partitioned write (current logic)
-                 write_partitioned_parquet(df_ndfd, config.NDFD_S3_URL, partition_cols=["year", "month"])
+                 #write_partitioned_parquet(df_ndfd, config.NDFD_S3_URL, partition_cols=["year", "month"])
+                s3_url = f'{config.NDFD_S3_URL}{current.year}_{current.month:02d}_ndfd_{config.ELEMENT.lower()}_archive.parquet'
+                write_to_s3(df_ndfd, s3_url)
             else:
                 # looping through sites and saving .csv files locally
                 for site in sites:
