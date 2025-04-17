@@ -47,16 +47,21 @@ def extract_timestamp(filename):
     time_str = os.path.basename(filename).split("_")[-1]
     return datetime.strptime(time_str, "%Y%m%d%H%M")
 
-def get_ndfd_file_list(start, end, element_dict, element_type="Wind"):
+def get_ndfd_file_list(start, end, element_dict, element_type=config.ELEMENT):
     start = pd.to_datetime(start, format="%Y%m%d%H%M") - pd.Timedelta(days=3)
     end = pd.to_datetime(end, format="%Y%m%d%H%M")
     date_range = pd.date_range(start=start, end=end, freq="D")
 
     base_s3 = "s3://noaa-ndfd-pds/wmo"
     fs = fsspec.filesystem("s3", anon=True)
-    filtered_files = {"wspd": [], "wdir": []}
+    if element_type == "Wind":
+        filtered_files = {"wspd": [], "wdir": []}
+        components = ["wspd", "wdir"]
+    elif element_type == "Gust":
+        filtered_files = {"wgust": []}
+        components = ["wgust"]
 
-    for component in ["wspd", "wdir"]:
+    for component in components:
         prefixes = element_dict[element_type][component]
         for tdate in date_range:
             for prefix in prefixes:
@@ -126,6 +131,8 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                         record["wind_dir_deg"] = round(float(direc), 0)
                 elif config.ELEMENT == "Temperature":
                     record["temp_f"] = round(float(spd), 1)
+                elif config.ELEMENT == "Gust":
+                    record["wind_gust_kt"] = round(float(spd * 1.94384), 2)
                 else:
                     record[spd_key] = float(spd)
 
@@ -160,7 +167,7 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
         for i, future in enumerate(as_completed(futures), 1):
             results.append(future.result())
             print(f"✅ Completed {i}/{len(matched_pairs)} file pairs.")
-
+    
     return pd.concat(results, ignore_index=True)
 
 

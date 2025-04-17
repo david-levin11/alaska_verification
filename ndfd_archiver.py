@@ -1,5 +1,6 @@
 from archiver_base import Archiver
 import os
+import sys
 import pandas as pd
 from utils import get_ndfd_file_list, extract_ndfd_forecasts_parallel, create_wind_metadata, parse_metadata
 
@@ -31,7 +32,15 @@ class NDFDArchiver(Archiver):
         return get_ndfd_file_list(start, end, self.config.NDFD_DICT)
 
     def process_files(self, file_list):
-        speed_key, dir_key, _ = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT]
+        if self.config.ELEMENT == "Wind":
+            speed_key, dir_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT]
+        elif self.config.ELEMENT == "Gust":
+            speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
+            dir_key = None
+        else:
+            print(f"process_files is not set up yet for {self.config.ELEMENT}.  Add to ndfd_archiver.py and archiver_config")
+            sys.exit()
         speed_files = file_list[speed_key]
         dir_files = file_list.get(dir_key, [])
         return extract_ndfd_forecasts_parallel(speed_files, dir_files, self.station_df, tmp_dir=self.config.TMP)
+

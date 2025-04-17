@@ -39,9 +39,9 @@ if ELEMENT == "Wind":
 
 NETWORK = "1,107,90,179,200,286,3004"
 
-OBS_START = "202104010000"
+OBS_START = "202201010000"
 
-OBS_END = "202201010000"
+OBS_END = "202201100000"
 # Start with 1 second and back off
 INITIAL_WAIT = 1
 # Number of retry attempts
@@ -77,19 +77,21 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
 ########################## NDFD Params #################################
 NDFD_DIR = 'ndfd'
 
-NDFD_DICT = {"Wind": {"wspd": ["YCRZ98", "YCRZ97"], "wdir": ["YBRZ98", "YBRZ97"]}}
+NDFD_DICT = {"Wind": {"wspd": ["YCRZ98", "YCRZ97"], "wdir": ["YBRZ98", "YBRZ97"]}, "Gust": {"wgust": ["YWRZ98"]}}
 
 NDFD_SPEED_STRING = "YCRZ98"
 
 NDFD_DIR_STRING = "YBRZ98"
 
+NDFD_GUST_STRING = "YWRZ98"
+
 NDFD_SPEED_STRING_EXT = "YCRZ97"
 
 NDFD_DIR_STRING_EXT = "YBRZ97"
 
-NDFD_FILE_STRINGS = {"Wind": ["wspd", "wdir", "wgust"]}
+NDFD_FILE_STRINGS = {"Wind": ["wspd", "wdir"], "Gust": ["wgust"]}
 
-NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10", "ifg10"]}
+NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"], "Gust": ["i10fg"]}
 
 NDFD_S3_URL = "s3://alaska-verification/ndfd/"
 

@@ -42,6 +42,7 @@ class Archiver(ABC):
             print(f"\u274C Failed to write partitioned parquet: {e}")
 
     def write_to_s3(self, df, s3_path):
+        #print(df.head())
         try:
             fs = fsspec.filesystem("s3", profile="default", client_kwargs={"region_name": "us-east-2"})
             with fs.open(s3_path, "wb") as f:
