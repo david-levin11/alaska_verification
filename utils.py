@@ -5,6 +5,8 @@ import requests
 import fsspec
 import xarray as xr
 from datetime import datetime
+from herbie import FastHerbie, Herbie
+from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import archiver_config as config  # Update 'your_module' with actual config import path
 
@@ -171,4 +173,7 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
     return pd.concat(results, ignore_index=True)
 
 
-## TODO What happens when we don't have direction files?  I.E pulling gusts or temps in process_file_pair or extract_ndfd_forecasts parallel
+
+
+
+## TODO Add in Herbie logic to download model data
