@@ -1,0 +1,10 @@
+pandas
+numpy
+xarray
+fsspec
+cfgrib
+pyarrow
+requests
+python-dateutil
+s3fs
+shutil

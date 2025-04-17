@@ -39,9 +39,9 @@ if ELEMENT == "Wind":
 
 NETWORK = "1,107,90,179,200,286,3004"
 
-OBS_START = "202103010000"
+OBS_START = "202104010000"
 
-OBS_END = "202104010000"
+OBS_END = "202201010000"
 # Start with 1 second and back off
 INITIAL_WAIT = 1
 # Number of retry attempts

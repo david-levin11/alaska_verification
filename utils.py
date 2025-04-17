@@ -162,3 +162,6 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
             print(f"✅ Completed {i}/{len(matched_pairs)} file pairs.")
 
     return pd.concat(results, ignore_index=True)
+
+
+## TODO What happens when we don't have direction files?  I.E pulling gusts or temps in process_file_pair or extract_ndfd_forecasts parallel
