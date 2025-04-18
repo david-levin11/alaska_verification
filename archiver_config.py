@@ -41,7 +41,7 @@ NETWORK = "1,107,90,179,200,286,3004"
 
 OBS_START = "202201010000"
 
-OBS_END = "202201100000"
+OBS_END = "202201030000"
 # Start with 1 second and back off
 INITIAL_WAIT = 1
 # Number of retry attempts
@@ -60,14 +60,14 @@ HERBIE_PRODUCTS = {'nbm':'ak',
 			}
 
 HERBIE_FORECASTS = {
-		'nbm':[5,11,17,23,29,35,41,47,53,59,65,71,77,83,89,95,101,107,113,119],
+		'nbm':[5,11,17,23,29,35,41,47,53,59,65,71,83,95,107,119,131,143,155,167],
 		'gfs':[24,48,72,96],
 		'hrrrak':[12,24,36],
 		'rtma_ak':[0],  # hourly run, no fcsts, just analysis
 		'urma_ak':[0],  # same as rtma, no fcsts, just analysis
 		}
 
-HERBIE_CYCLES = {"nbm": "12h", "hrrrak": "3h", "urma_ak": "3h", "gfs": "6h", "rtma_ak": "3h"}
+HERBIE_CYCLES = {"nbm": "6h", "hrrrak": "3h", "urma_ak": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
 ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10']}}
 
@@ -115,6 +115,19 @@ HERBIE_OPEN_INSTRUCTIONS = {
         }
     }
 }
+
+HERBIE_OUTPUT_COLUMNS = {
+    "Wind": {
+        "nbm": ["wind_speed_kt", "wind_dir_deg", "wind_gust_kt"]
+    },
+    "Temperature": {
+        "nbm": ["temp_f"]
+    },
+    "Precipitation": {
+        "nbm": ["precip_in"]
+    }
+}
+
 
 ########################## NDFD Params #################################
 NDFD_DIR = 'ndfd'

@@ -9,6 +9,7 @@ import xarray as xr
 import pandas as pd
 from herbie import FastHerbie, Herbie
 from glob import glob
+import shutil
 import archiver_config as config
 from utils import generate_model_date_range, create_wind_metadata, parse_metadata
 import warnings
@@ -140,16 +141,35 @@ class NBMArchiver(Archiver):
 
         df["forecast_hour"] = (df["valid_time"] - df["time"]).dt.total_seconds() // 3600
         df["forecast_hour"] = df["forecast_hour"].astype(int)
-
+        df["init_time"] = df["valid_time"] - pd.to_timedelta(df["forecast_hour"], unit="h")
+        if "wind_dir_deg" in df.columns:
+            df["wind_dir_deg"] = df["wind_dir_deg"].round(0).astype("Int64")
         df = df.rename(columns={"point_stid": "station_id"})
 
-        expected_cols = ["station_id", "valid_time", "forecast_hour"]
-        for col in ["wind_speed_kt", "wind_dir_deg", "wind_gust_kt"]:
+        expected_cols = ["station_id", "init_time", "valid_time", "forecast_hour"]
+        output_vars = self.config.HERBIE_OUTPUT_COLUMNS[element][self.config.MODEL]
+        for col in output_vars:
             if col in df.columns:
                 expected_cols.append(col)
 
         return df[expected_cols]
     
+    def clean_herbie_cache(self, base_path="~/data", model="nbm"):
+        base_path = os.path.expanduser(base_path)
+        deleted_dirs = []
+        model_path = os.path.join(base_path, model)
+        if os.path.exists(model_path):
+            for subdir in os.listdir(model_path):
+                full_path = os.path.join(model_path, subdir)
+                if os.path.isdir(full_path):
+                    print(f"🧹 Deleting {full_path}")
+                    shutil.rmtree(full_path)
+                    deleted_dirs.append(full_path)
+        else:
+            print(f"⚠️ Path not found: {model_path}")
+
+        print(f"\n✅ Deleted {len(deleted_dirs)} cache folders.")
+        return deleted_dirs
     
 
 if __name__ == "__main__":
@@ -158,9 +178,12 @@ if __name__ == "__main__":
     #print(metadata.head())
     ds = archiver.download_data(metadata)
     print(ds.head())
+    print(len(ds))
+    #archiver.clean_herbie_cache()
     #df = archiver.process_files(ds)
     #print(df.head())
     #print(df["valid_time"].dt.strftime("%Y-%m-%d %H:%M:%S").head(10))
 
 ## TODO Need to generate my list of rundates outside and pass it in...otherwise it regenerates different run times each time
 ## TODO may need to explore just abandoning Herbie and using fsspec and download_subset to accomplish what we did with NDFD
+## TODO using a config variable for start and end may end up being problematic.  Might need to initialize the script with argv for start and end
