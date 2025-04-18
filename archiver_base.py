@@ -69,3 +69,11 @@ class Archiver(ABC):
 
     def ensure_metadata(self):
         pass
+
+    def download_data(self, model, dates, stations):
+        """Optionally implemented by subclasses that require on-the-fly downloading"""
+        pass
+
+    def get_forecast_cycle_dates(self, model: str) -> pd.DatetimeIndex:
+        from utils import generate_model_date_range
+        return generate_model_date_range(model, self.config)

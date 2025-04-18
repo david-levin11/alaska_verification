@@ -172,6 +172,11 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
     
     return pd.concat(results, ignore_index=True)
 
+def generate_model_date_range(model, config):
+    cycle = config.HERBIE_CYCLES[model]
+    start = pd.Timestamp(config.OBS_START)
+    end = pd.Timestamp(config.OBS_END)
+    return pd.date_range(start=start, end=end, freq=cycle)
 
 
 
