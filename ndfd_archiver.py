@@ -5,8 +5,9 @@ import pandas as pd
 from utils import get_ndfd_file_list, extract_ndfd_forecasts_parallel, create_wind_metadata, parse_metadata
 
 class NDFDArchiver(Archiver):
-    def __init__(self, config):
+    def __init__(self, config, start=None):
         super().__init__(config)
+        self.start = start or config.OBS_START  # fallback to config if not passed
         self.station_df = self.ensure_metadata()
 
     def ensure_metadata(self):
@@ -20,7 +21,7 @@ class NDFDArchiver(Archiver):
                 self.config.STATE,
                 self.config.NETWORK,
                 self.config.WIND_VARS,
-                self.config.OBS_START
+                self.start  # ✅ new
             )
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)

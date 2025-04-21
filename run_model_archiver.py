@@ -29,7 +29,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
 
     config.MODEL = model_name
     config.ELEMENT = element
-    archiver = ModelArchiver(config)
+    archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M"))
     current = start
 
     while current <= end:

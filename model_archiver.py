@@ -5,8 +5,9 @@ import pandas as pd
 import archiver_config as config
 
 class ModelArchiver(Archiver):
-    def __init__(self, config):
+    def __init__(self, config, start=None):
         super().__init__(config)
+        self.start = start or config.OBS_START  # default fallback
         self.station_df = self.ensure_metadata()
 
     def ensure_metadata(self):
@@ -19,7 +20,7 @@ class ModelArchiver(Archiver):
                 self.config.STATE,
                 self.config.NETWORK,
                 self.config.WIND_VARS,
-                self.config.OBS_START
+                self.start  # ✅ Use dynamic start date
             )
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)
