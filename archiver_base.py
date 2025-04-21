@@ -1,16 +1,10 @@
 from abc import ABC, abstractmethod
-import os
 import pandas as pd
 import pyarrow.parquet as pq
 import pyarrow as pa
 import pyarrow.fs as pafs
 import fsspec
-import requests
-import numpy as np
-import xarray as xr
-import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from pathlib import Path
 import pandas as pd
 
 class Archiver(ABC):
@@ -41,15 +35,27 @@ class Archiver(ABC):
         except Exception as e:
             print(f"\u274C Failed to write partitioned parquet: {e}")
 
-    def write_to_s3(self, df, s3_path):
-        #print(df.head())
+    def write_to_s3(self, df, s3_path, profile="default", region="us-east-2"):
         try:
-            fs = fsspec.filesystem("s3", profile="default", client_kwargs={"region_name": "us-east-2"})
+            fs = fsspec.filesystem("s3", profile=profile, client_kwargs={"region_name": region})
             with fs.open(s3_path, "wb") as f:
                 df.to_parquet(f, index=False)
-            print(f"\u2705 Successfully wrote to {s3_path}")
+            print(f"✅ Successfully wrote to {s3_path}")
         except Exception as e:
-            print(f"\u274C Failed to write to S3: {e}")
+            print(f"❌ Failed to write to S3: {e}")
+
+    def write_local_output(self, df, local_path):
+        """
+        Save DataFrame locally to a Parquet file.
+        """
+        try:
+            local_path = Path(local_path)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(local_path, index=False)
+            print(f"📁 Saved locally: {local_path}")
+        except Exception as e:
+            print(f"❌ Failed to write local file: {local_path} — {e}")
+
 
     def append_to_parquet_s3(self, df_new, s3_path, unique_keys):
         try:
@@ -74,6 +80,3 @@ class Archiver(ABC):
         """Optionally implemented by subclasses that require on-the-fly downloading"""
         pass
 
-    def get_forecast_cycle_dates(self, model: str) -> pd.DatetimeIndex:
-        from utils import generate_model_date_range
-        return generate_model_date_range(model, self.config)

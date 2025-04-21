@@ -1,15 +1,35 @@
-from model_archiver import NBMArchiver
+import argparse
+from model_archiver import ModelArchiver
 import archiver_config as config
 import pandas as pd
 from dateutil.relativedelta import relativedelta
-import os
 import shutil
+import os
+import sys
 
-def run_model_archiver(archiver, model_name="nbm"):
-    station_df = archiver.ensure_metadata()
+def run_monthly_archiving(start, end, model_name, element, use_local):
 
-    start = pd.to_datetime(config.OBS_START)
-    end = pd.to_datetime(config.OBS_END)
+    # Normalize to match config keys
+    model = model_name.lower()
+    element_title = element.title()  # "wind" → "Wind", etc.
+
+    # Validate
+    if model not in config.HERBIE_MODELS:
+        print(f"❌ Model '{model}' not recognized. Valid options: {config.HERBIE_MODELS}")
+        sys.exit(1)
+    if element_title not in config.ELEMENT_DICT:
+        print(f"❌ Element '{element}' not recognized. Valid options: {list(config.ELEMENT_DICT.keys())}")
+        sys.exit(1)
+
+    if use_local:
+        config.USE_CLOUD_STORAGE = False
+        print("📁 Local storage enabled (S3 writing disabled).")
+    else:
+        config.USE_CLOUD_STORAGE = True
+
+    config.MODEL = model_name
+    config.ELEMENT = element
+    archiver = ModelArchiver(config)
     current = start
 
     while current <= end:
@@ -17,22 +37,47 @@ def run_model_archiver(archiver, model_name="nbm"):
         if chunk_end > end:
             chunk_end = end
 
-        print(f"📦 Model: {model_name} — {current:%Y-%m} chunk")
+        print(f"\n📆 Processing {model_name.upper()} {element} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
+        file_urls = archiver.fetch_file_list(current, chunk_end)
 
-        config.OBS_START = current.strftime("%Y-%m-%d %H:%M")
-        config.OBS_END = chunk_end.strftime("%Y-%m-%d %H:%M")
-
-        df = archiver.download_data(stations=station_df, model=model_name)
-        #df = archiver.process_files(ds)
-
-        s3_url = f"{config.NBM_S3_URL}{current.year}_{current.month:02d}_{model_name}_{config.ELEMENT.lower()}_archive.parquet"
-        archiver.write_to_s3(df, s3_url)
+        if not file_urls:
+            print("⚠️ No files found for this chunk.")
+        else:
+            df = archiver.process_files(file_urls)
+            if df.empty:
+                print("⚠️ No data extracted for this chunk.")
+            else:
+                if config.USE_CLOUD_STORAGE:
+                    s3_path = f"{config.S3_URLS[config.MODEL]}{current.year}_{current.month:02d}_{model}_{element.lower()}_archive.parquet"
+                    archiver.write_to_s3(df, s3_path)
+                else:
+                    local_path = os.path.join(
+                        config.MODEL_DIR,
+                        model,
+                        element.lower(),
+                        f"{current.year}_{current.month:02d}_archive.parquet"
+                    )
+                    archiver.write_local_output(df, local_path)
 
         shutil.rmtree(config.TMP, ignore_errors=True)
-        os.makedirs(config.TMP)
+        os.makedirs(config.TMP, exist_ok=True)
 
         current += relativedelta(months=1)
 
 if __name__ == "__main__":
-    archiver = NBMArchiver(config)
-    run_model_archiver(archiver, model_name="nbm")
+    parser = argparse.ArgumentParser(description="Model Archiver")
+    parser.add_argument("--start", required=True, help="Start datetime (e.g. 2022-01-01)")
+    parser.add_argument("--end", required=True, help="End datetime (e.g. 2022-02-01)")
+    parser.add_argument("--model", required=True, help="Model name (e.g. nbm, gfs, hrrrak)")
+    parser.add_argument("--element", required=True, help="Forecast element (e.g. Wind, Gust, Temperature)")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="If set, store output locally instead of S3 (overrides USE_CLOUD_STORAGE)"
+    )
+
+    args = parser.parse_args()
+    start = pd.to_datetime(args.start)
+    end = pd.to_datetime(args.end)
+
+    run_monthly_archiving(start, end, args.model, args.element, args.local)

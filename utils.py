@@ -1,12 +1,15 @@
 import os
+import sys
+import re
 import numpy as np
 import pandas as pd
 import requests
 import fsspec
 import xarray as xr
 from datetime import datetime
-from herbie import FastHerbie, Herbie
-from glob import glob
+from pathlib import Path
+#from herbie import FastHerbie, Herbie
+#from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import archiver_config as config  # Update 'your_module' with actual config import path
 
@@ -178,7 +181,185 @@ def generate_model_date_range(model, config):
     end = pd.Timestamp(config.OBS_END)
     return pd.date_range(start=start, end=end, freq=cycle)
 
+def generate_chunked_date_range(model, chunk_start, chunk_end, config):
+    cycle = config.HERBIE_CYCLES[model]
+    return pd.date_range(start=chunk_start, end=chunk_end, freq=cycle)
 
+def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", domain="ak"):
+    """
+    Generate available NBM HTTPS URLs by checking if the index file (.idx) exists.
+
+    Returns:
+    - list[str] — HTTPS URLs to GRIB2 files
+    """
+    #base_url = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
+    init_times = pd.date_range(start=start, end=end, freq=cycle)
+    if model == "nbm":
+        designator = "blend"
+    else:
+        print(f"url formatting for {base_url} for {model} not implemented. Check file name on AWS such as 'blend.t12z.f024.ak.grib2'.")
+        raise NotImplementedError
+        sys.exit()
+    file_urls = []
+    for init in init_times:
+        init_date = init.strftime("%Y%m%d")
+        init_hour = init.strftime("%H")
+        for fh in fcst_hours:
+            fxx = f"f{fh:03d}"
+            relative_path = f"{designator}.{init_date}/{init_hour}/core/{designator}.t{init_hour}z.core.{fxx}.{domain}.grib2"
+            full_url = f"{base_url}/{relative_path}"
+            idx_url = full_url + ".idx"
+
+            try:
+                r = requests.head(idx_url, timeout=5)
+                if r.ok:
+                    file_urls.append(full_url)
+                else:
+                    print(f"⚠️ Missing: {idx_url} — {r.status_code}")
+            except requests.exceptions.RequestException as e:
+                print(f"⚠️ Error accessing {idx_url}: {e}")
+    #print(f"File urls are: {file_urls}")
+    return file_urls
+
+def download_subset(remote_url, remote_file, local_filename, search_strings):
+    """
+    Download subset of GRIB2 file based on .idx entries matching search_strings.
+
+    Parameters:
+    - remote_url: full HTTPS URL to GRIB2 file
+    - remote_file: name of file (for naming output file)
+    - local_filename: local file name to save subset
+    - search_strings: list of strings to match in .idx lines (e.g., [":WIND:10 m above", ":WDIR:10 m above"])
+    """
+    print("  > Downloading a subset of NBM gribs")
+    #print("🧪 Search strings received:", search_strings)
+    #print(search_string)
+    #sys.exit()
+    local_file = os.path.join("nbm", local_filename)
+    os.makedirs(os.path.dirname(local_file), exist_ok=True)
+
+    idx_url = remote_url + ".idx"
+    r = requests.get(idx_url)
+    if not r.ok:
+        print(f'     ❌ SORRY! Could not get index file: {idx_url} ({r.status_code} {r.reason})')
+        return None
+
+    lines = r.text.strip().split('\n')
+    expr = re.compile("|".join(re.escape(s) for s in search_strings))
+
+    byte_ranges = {}
+    for n, line in enumerate(lines, start=1):
+        if "ens std dev" in line:
+            continue  # skip ensemble standard deviation entries
+
+        if expr.search(line):
+            parts = line.split(':')
+            rangestart = int(parts[1])
+
+            # Use next line's byte offset as range end
+            if n < len(lines):
+                parts_next = lines[n].split(':')
+                rangeend = int(parts_next[1])
+            else:
+                rangeend = ''  # last entry, read to end
+
+            byte_ranges[f'{rangestart}-{rangeend}'] = line
+
+    if not byte_ranges:
+        print(f'      ❌ Unsuccessful! No matches for {search_strings}')
+        return None
+
+    for i, (byteRange, line) in enumerate(byte_ranges.items()):
+        if i == 0:
+            curl = f'curl -s --range {byteRange} {remote_url} > {local_file}'
+        else:
+            curl = f'curl -s --range {byteRange} {remote_url} >> {local_file}'
+        os.system(curl)
+
+    if os.path.exists(local_file):
+        print(f'      ✅ Success! Matched [{len(byte_ranges)}] fields from {remote_file} → {local_file}')
+        return local_file
+    else:
+        print(f'      ❌ Failed to save subset to {local_file}')
+        return None
+
+
+def extract_model_subset_parallel(
+    file_urls, station_df, search_strings, element, model, config
+):
+    rename_map = config.HERBIE_RENAME_MAP[element][model]
+    conversion_map = config.HERBIE_UNIT_CONVERSIONS[element].get(model, {})
+    #print(search_strings)
+    #sys.exit()
+    def process_file(remote_url):
+        records = []
+        try:
+            remote_file = os.path.basename(remote_url)
+            local_file = download_subset(
+                remote_url=remote_url,
+                remote_file=remote_file,
+                local_filename=remote_file,
+                search_strings=search_strings
+            )
+
+            if not os.path.exists(local_file):
+                return pd.DataFrame()
+
+            ds = xr.open_dataset(
+                local_file,
+                engine="cfgrib",
+                backend_kwargs={"indexpath": ""},
+                decode_timedelta=True
+            )
+
+            lats = ds.latitude.values
+            lons = ds.longitude.values - 360
+            valid_time = pd.to_datetime(ds.valid_time.values)
+            forecast_hour = int(re.search(r"\.f(\d{3})\.", remote_file).group(1))
+
+            for _, row in station_df.iterrows():
+                stid = row["stid"]
+                lat, lon = row["latitude"], row["longitude"]
+
+                if stid in station_index_cache:
+                    iy, ix = station_index_cache[stid]
+                else:
+                    iy, ix = ll_to_index(lat, lon, lats, lons)
+                    station_index_cache[stid] = (iy, ix)
+
+                record = {
+                    "station_id": stid,
+                    "init_time": valid_time - pd.to_timedelta(forecast_hour, unit="h"),
+                    "valid_time": valid_time,
+                    "forecast_hour": forecast_hour,
+                }
+
+                for grib_var, renamed_var in rename_map.items():
+                    if grib_var not in ds:
+                        continue
+                    val = ds[grib_var].values[iy, ix]
+                    factor = conversion_map.get(renamed_var, 1.0)
+                    if pd.notnull(val):
+                        if "deg" in renamed_var:
+                            record[renamed_var] = round(float(val), 0)
+                        else:
+                            record[renamed_var] = round(float(val * factor), 2)
+
+                records.append(record)
+
+            Path(local_file).unlink(missing_ok=True)
+        except Exception as e:
+            print(f"❌ Failed to process {remote_url}: {e}")
+        return pd.DataFrame.from_records(records)
+
+    results = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(process_file, url) for url in file_urls]
+        for i, future in enumerate(as_completed(futures), 1):
+            results.append(future.result())
+            print(f"✅ Completed {i}/{len(file_urls)} files.")
+
+    return pd.concat(results, ignore_index=True)
 
 
 ## TODO Add in Herbie logic to download model data

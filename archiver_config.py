@@ -41,7 +41,7 @@ NETWORK = "1,107,90,179,200,286,3004"
 
 OBS_START = "202201010000"
 
-OBS_END = "202201030000"
+OBS_END = "202202010000"
 # Start with 1 second and back off
 INITIAL_WAIT = 1
 # Number of retry attempts
@@ -69,9 +69,9 @@ HERBIE_FORECASTS = {
 
 HERBIE_CYCLES = {"nbm": "6h", "hrrrak": "3h", "urma_ak": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
-ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10']}}
+ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10', 'i10fg']}}
 
-HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:'],
+HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
 								   'hrrrak': [':[UV]GRD:10 m above',':GUST:']}}
 
 HERBIE_RENAME_MAP = {
@@ -128,6 +128,8 @@ HERBIE_OUTPUT_COLUMNS = {
     }
 }
 
+HERBIE_DOMAIN = "ak"
+
 
 ########################## NDFD Params #################################
 NDFD_DIR = 'ndfd'
@@ -152,4 +154,8 @@ NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"], "Gust": ["i10fg"]}
 
 NDFD_S3_URL = "s3://alaska-verification/ndfd/"
 
-NBM_S3_URL = "s3://alaska-verification/nbm/"
+NBM_S3_URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com/"
+
+S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/", "nbm": "s3://alaska-verification/nbm/"}
+
+MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com"}
