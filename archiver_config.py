@@ -159,3 +159,8 @@ NBM_S3_URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com/"
 S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/", "nbm": "s3://alaska-verification/nbm/"}
 
 MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com"}
+
+
+#################### Processing Params ########################
+# for process pool operations
+MAX_WORKERS = 8

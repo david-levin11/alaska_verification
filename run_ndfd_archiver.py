@@ -1,4 +1,5 @@
 import argparse
+import tempfile
 from ndfd_archiver import NDFDArchiver
 import archiver_config as config
 import pandas as pd
@@ -6,6 +7,10 @@ from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
+
+# setting temp file dir
+os.makedirs(config.TMP, exist_ok=True)
+tempfile.tempdir = config.TMP
 
 def run_monthly_archiving(start, end, element, use_local):
     # Normalize element (e.g., wind → Wind)
@@ -28,7 +33,8 @@ def run_monthly_archiving(start, end, element, use_local):
 
         print(f"\n📆 Processing {element_title} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
         filtered_files = archiver.fetch_file_list(current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
-
+        #print(filtered_files)
+        #sys.exit(1)
         file_key = config.NDFD_FILE_STRINGS[element_title][0]
         if not filtered_files[file_key]:
             print(f"⚠️ No data for {current} to {chunk_end}")
@@ -37,7 +43,7 @@ def run_monthly_archiving(start, end, element, use_local):
             filename = f"{current.year}_{current.month:02d}_ndfd_{element_title.lower()}_archive.parquet"
 
             if config.USE_CLOUD_STORAGE:
-                s3_url = f"{config.NDFD_S3_URL}{filename}"
+                s3_url = f"{config.S3_URLS["ndfd"]}{filename}"
                 archiver.write_to_s3(df, s3_url)
             else:
                 local_path = os.path.join(config.NDFD_DIR, element_title.lower(), filename)

@@ -8,8 +8,6 @@ import fsspec
 import xarray as xr
 from datetime import datetime
 from pathlib import Path
-#from herbie import FastHerbie, Herbie
-#from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import archiver_config as config  # Update 'your_module' with actual config import path
 
@@ -52,7 +50,7 @@ def extract_timestamp(filename):
     time_str = os.path.basename(filename).split("_")[-1]
     return datetime.strptime(time_str, "%Y%m%d%H%M")
 
-def get_ndfd_file_list(start, end, element_dict, element_type=config.ELEMENT):
+def get_ndfd_file_list(start, end, element_dict, element_type):
     start = pd.to_datetime(start, format="%Y%m%d%H%M") - pd.Timedelta(days=3)
     end = pd.to_datetime(end, format="%Y%m%d%H%M")
     date_range = pd.date_range(start=start, end=end, freq="D")
@@ -148,6 +146,7 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
     return pd.DataFrame.from_records(records)
 
 def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tmp_dir):
+    print(f"TMP dir is: {tmp_dir}")
     element_keys = config.NDFD_ELEMENT_STRINGS[config.ELEMENT]
     speed_with_time = sorted([(f, extract_timestamp(f)) for f in speed_files], key=lambda x: x[1])
     dir_with_time = sorted([(f, extract_timestamp(f)) for f in direction_files], key=lambda x: x[1])
@@ -167,7 +166,7 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
             matched_pairs.append((speed_file, None))
 
     results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
         futures = [executor.submit(process_file_pair, s, d, station_df, tmp_dir, element_keys) for s, d in matched_pairs]
         for i, future in enumerate(as_completed(futures), 1):
             results.append(future.result())
@@ -353,7 +352,7 @@ def extract_model_subset_parallel(
         return pd.DataFrame.from_records(records)
 
     results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
         futures = [executor.submit(process_file, url) for url in file_urls]
         for i, future in enumerate(as_completed(futures), 1):
             results.append(future.result())
@@ -361,5 +360,5 @@ def extract_model_subset_parallel(
 
     return pd.concat(results, ignore_index=True)
 
-
-## TODO Add in Herbie logic to download model data
+## TODO ADD hrrrak, urma, rrfs
+## TODO ADD temp, precip vars

@@ -49,10 +49,13 @@ class ModelArchiver(Archiver):
             config=self.config
         )
 
+## TODO ADD hrrrak, urma, rrfs
+## TODO ADD temp, precip vars
 
-if __name__ == "__main__":
-    archiver = ModelArchiver(config)
-    files = archiver.fetch_file_list("2022-01-01 01:00:00", "2022-01-03 01:00:00")
-    #print(files)
-    df = archiver.process_files(files)
-    print(df.head())
+
+# if __name__ == "__main__":
+#     archiver = ModelArchiver(config)
+#     files = archiver.fetch_file_list("2022-01-01 01:00:00", "2022-01-03 01:00:00")
+#     #print(files)
+#     df = archiver.process_files(files)
+#     print(df.head())

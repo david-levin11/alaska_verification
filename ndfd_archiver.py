@@ -30,7 +30,7 @@ class NDFDArchiver(Archiver):
             return pd.read_csv(meta_path)
 
     def fetch_file_list(self, start, end):
-        return get_ndfd_file_list(start, end, self.config.NDFD_DICT)
+        return get_ndfd_file_list(start, end, self.config.NDFD_DICT, self.config.ELEMENT)
 
     def process_files(self, file_list):
         if self.config.ELEMENT == "Wind":

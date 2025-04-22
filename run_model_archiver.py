@@ -80,4 +80,12 @@ if __name__ == "__main__":
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
 
+    if args.model.lower() != 'nbm':
+        print(f"Archiving not yet set up for models other than nbm")
+        raise NotImplementedError
+
+    if args.element.title() != "Wind":
+        print(f"Still working on setting up archiving for {args.element} for the {args.model}")
+        raise NotImplementedError
+
     run_monthly_archiving(start, end, args.model, args.element, args.local)
