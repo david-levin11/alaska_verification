@@ -34,8 +34,19 @@ METADATA_URL = "https://api.synopticdata.com/v2/stations/metadata"
 
 STATE = "ak"
 
-if ELEMENT == "Wind":
-	WIND_VARS = "wind_direction,wind_speed,wind_gust"
+HFMETAR = "0"
+
+OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"]}
+
+OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"]}
+
+OBS_RENAME_MAP = {
+    "Wind": {
+        "wind_speed_set_1": "obs_wind_speed_kts",
+        "wind_direction_set_1": "obs_wind_dir_deg",
+        "wind_gust_set_1": "obs_wind_gust_kts"
+    }
+}
 
 NETWORK = "1,107,90,179,200,286,3004"
 
@@ -156,7 +167,7 @@ NDFD_S3_URL = "s3://alaska-verification/ndfd/"
 
 NBM_S3_URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com/"
 
-S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/", "nbm": "s3://alaska-verification/nbm/"}
+S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/", "nbm": "s3://alaska-verification/nbm/", "obs": "s3://alaska-verification/obs/"}
 
 MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com"}
 
