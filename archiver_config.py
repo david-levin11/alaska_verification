@@ -61,7 +61,7 @@ MAX_RETRIES = 5
 ################### Model Params ###################################
 MODEL = 'nbm'
 
-HERBIE_MODELS = ['hrrrak','nbm','urma_ak','rtma_ak','gfs']
+HERBIE_MODELS = ['hrrr','nbm','urma_ak','rtma_ak','gfs']
 
 HERBIE_PRODUCTS = {'nbm':'ak',
 			'gfs':'pgrb2.0p25',
@@ -85,11 +85,15 @@ ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10', 'i10fg']}}
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
 								   'hrrrak': [':[UV]GRD:10 m above',':GUST:']}}
 
+HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground']}}
+
+HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev']}}
+
 HERBIE_RENAME_MAP = {
     "Wind": {
         "nbm": {
-            "si10": "wind_speed_kt",
             "wdir10": "wind_dir_deg",
+            "si10": "wind_speed_kt",
             "i10fg": "wind_gust_kt"
         },
         "urma_ak": {

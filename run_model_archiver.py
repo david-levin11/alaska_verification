@@ -39,11 +39,13 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
 
         print(f"\n📆 Processing {model_name.upper()} {element} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
         file_urls = archiver.fetch_file_list(current, chunk_end)
-
+        print(f'File urls are: {file_urls}')
         if not file_urls:
             print("⚠️ No files found for this chunk.")
         else:
             df = archiver.process_files(file_urls)
+            #print(f'Dataframe is: {df.head(10)}')
+            #df.to_csv('test.csv')
             if df.empty:
                 print("⚠️ No data extracted for this chunk.")
             else:
