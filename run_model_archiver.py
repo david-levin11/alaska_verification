@@ -39,7 +39,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
 
         print(f"\n📆 Processing {model_name.upper()} {element} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
         file_urls = archiver.fetch_file_list(current, chunk_end)
-        print(f'File urls are: {file_urls}')
+        #print(f'File urls are: {file_urls}')
         if not file_urls:
             print("⚠️ No files found for this chunk.")
         else:
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
 
-    if args.model.lower() not in ['nbm', 'hrrr']:
+    if args.model.lower() not in ['nbm', 'hrrr', 'urma']:
         print(f"Archiving not yet set up for models other than nbm")
         raise NotImplementedError
 
