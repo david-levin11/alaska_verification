@@ -193,10 +193,18 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", do
     Returns:
     - list[str] — HTTPS URLs to GRIB2 files
     """
+    if domain == "ak":
+        full_domain = "alaska"
+    elif domain == "co":
+        full_domain = "conus"
+    elif domain == "hi":
+        full_domain = "hawaii"
     #base_url = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
     init_times = pd.date_range(start=start, end=end, freq=cycle)
     if model == "nbm":
         designator = "blend"
+    elif model == 'hrrr':
+        designator = 'hrrr'
     else:
         print(f"url formatting for {base_url} for {model} not implemented. Check file name on AWS such as 'blend.t12z.f024.ak.grib2'.")
         raise NotImplementedError
@@ -206,8 +214,12 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", do
         init_date = init.strftime("%Y%m%d")
         init_hour = init.strftime("%H")
         for fh in fcst_hours:
-            fxx = f"f{fh:03d}"
-            relative_path = f"{designator}.{init_date}/{init_hour}/core/{designator}.t{init_hour}z.core.{fxx}.{domain}.grib2"
+            if model == 'nbm':
+                fxx = f"f{fh:03d}"
+                relative_path = f"{designator}.{init_date}/{init_hour}/core/{designator}.t{init_hour}z.core.{fxx}.{domain}.grib2"
+            elif model == 'hrrr':
+                fxx = f"f{fh:02d}"
+                relative_path = f"{designator}.{init_date}/{full_domain}/{designator}.t{init_hour}z.wrf{config.HERBIE_PRODUCTS[config.MODEL]}{fxx}.{domain}.grib2"
             full_url = f"{base_url}/{relative_path}"
             idx_url = full_url + ".idx"
 
@@ -259,8 +271,8 @@ def download_subset(remote_url, local_filename, search_strings, model, require_a
         if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
             continue
 
-        if required_phrases and not all(phrase in line for phrase in required_phrases):
-            continue
+        #if required_phrases and not all(phrase in line for phrase in required_phrases):
+        #    continue
 
         for search_str, expr in exprs.items():
             if expr.search(line):
@@ -305,9 +317,9 @@ def parse_date_and_time_from_url(remote_url, model):
     if model == 'nbm':
         return url_parts[-4], url_parts[-3]
     elif model == 'hrrr':
-        return url_parts[-3], url_parts[-2]
+        return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     else:
-        raise ValueError(f"Unsupported model: {model}")
+        raise ValueError(f"Unsupported date/time header parsing for model: {model}")
 
 def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
     rename_map = config.HERBIE_RENAME_MAP[element][model]
@@ -322,6 +334,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     def download_file(remote_url):
         remote_file = os.path.basename(remote_url)
         date_tag, time_tag = parse_date_and_time_from_url(remote_url, model)
+        #print(f"Date tag is: {date_tag} and time tag is {time_tag}")
         local_file = os.path.join(temp_download_dir, f"{date_tag}_{time_tag}_{remote_file}")  # or whatever your directory is
         downloaded_file = download_subset(
             remote_url=remote_url,
@@ -352,39 +365,49 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     
     for local_file in downloaded_files:
         print(f"Now processing {local_file}...")
-        try:
-            ds = xr.open_dataset(
-                local_file,
-                engine="cfgrib",
-                backend_kwargs={
-                    "indexpath": "",
-                    "errors": "ignore"
-                    },
-                decode_timedelta=True,
-            )
+        #try:
+        ds = xr.open_dataset(
+            local_file,
+            engine="cfgrib",
+            backend_kwargs={
+                "indexpath": "",
+                "errors": "ignore"
+                },
+            decode_timedelta=True,
+        )
 
-            lats = ds.latitude.values
-            lons = ds.longitude.values - 360  # wrap longitude
-            valid_time = pd.to_datetime(ds.valid_time.values)
+        lats = ds.latitude.values
+        lons = ds.longitude.values - 360  # wrap longitude
+        valid_time = pd.to_datetime(ds.valid_time.values)
+        if model == 'nbm':
             forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
+        elif model == 'hrrr':
+            match = re.search(r"f(\d{2,3})", os.path.basename(local_file))
+            if match:
+                forecast_hour = int(match.group(1))
+            else:
+                raise ValueError(f"Could not extract forecast hour from {local_file}")
+        else:
+            print(f'File pattern matching not yet set up for {model}')
+            raise NotImplementedError
 
-            for _, row in station_df.iterrows():
-                stid = row["stid"]
-                lat, lon = row["latitude"], row["longitude"]
+        for _, row in station_df.iterrows():
+            stid = row["stid"]
+            lat, lon = row["latitude"], row["longitude"]
 
-                if stid in station_index_cache:
-                    iy, ix = station_index_cache[stid]
-                else:
-                    iy, ix = ll_to_index(lat, lon, lats, lons)
-                    station_index_cache[stid] = (iy, ix)
+            if stid in station_index_cache:
+                iy, ix = station_index_cache[stid]
+            else:
+                iy, ix = ll_to_index(lat, lon, lats, lons)
+                station_index_cache[stid] = (iy, ix)
 
-                record = {
-                    "station_id": stid,
-                    "init_time": valid_time - pd.to_timedelta(forecast_hour, unit="h"),
-                    "valid_time": valid_time,
-                    "forecast_hour": forecast_hour,
-                }
-
+            record = {
+                "station_id": stid,
+                "init_time": valid_time - pd.to_timedelta(forecast_hour, unit="h"),
+                "valid_time": valid_time,
+                "forecast_hour": forecast_hour,
+            }
+            if model == 'nbm':
                 for grib_var, renamed_var in rename_map.items():
                     if grib_var not in ds:
                         continue
@@ -396,9 +419,35 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         else:
                             record[renamed_var] = round(float(val * factor), 2)
 
+                
+            elif model == 'hrrr':
+                u = v = None  # Default to None in case either component is missing
+
+                for grib_var, renamed_var in rename_map.items():
+                    if grib_var not in ds:
+                        continue
+                    val = ds[grib_var].values[iy, ix]
+                    factor = conversion_map.get(renamed_var, 1.0)
+                    val = val * factor if pd.notnull(val) else None
+
+                    if renamed_var == "u_wind":
+                        u = val
+                    elif renamed_var == "v_wind":
+                        v = val
+                    else:
+                        if val is not None:
+                            record[renamed_var] = round(float(val), 2)
+
+                # If both u and v exist, compute speed and direction
+                if u is not None and v is not None:
+                    speed = np.sqrt(u**2 + v**2)
+                    direction = (270 - np.degrees(np.arctan2(v, u))) % 360
+                    record["wind_dir_deg"] = round(float(direction), 0)
+                    record["wind_speed_kt"] = round(float(speed), 2)
+
                 all_records.append(record)
-        except Exception as e:
-            print(f"❌ Failed to process {local_file}: {e}")
+        #except Exception as e:
+        #    print(f"❌ Failed to process {local_file}: {e}")
     # cleaning up
     for local_file in downloaded_files:
         Path(local_file).unlink(missing_ok=True)

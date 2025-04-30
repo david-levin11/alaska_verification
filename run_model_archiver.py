@@ -44,7 +44,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
             print("⚠️ No files found for this chunk.")
         else:
             df = archiver.process_files(file_urls)
-            #print(f'Dataframe is: {df.head(10)}')
+            #print(f'Dataframe is: {df[df['station_id']=='PAAQ'].head(10)}')
             #df.to_csv('test.csv')
             if df.empty:
                 print("⚠️ No data extracted for this chunk.")
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
 
-    if args.model.lower() != 'nbm':
+    if args.model.lower() not in ['nbm', 'hrrr']:
         print(f"Archiving not yet set up for models other than nbm")
         raise NotImplementedError
 
