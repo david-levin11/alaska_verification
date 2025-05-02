@@ -34,8 +34,19 @@ METADATA_URL = "https://api.synopticdata.com/v2/stations/metadata"
 
 STATE = "ak"
 
-if ELEMENT == "Wind":
-	WIND_VARS = "wind_direction,wind_speed,wind_gust"
+HFMETAR = "0"
+
+OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"]}
+
+OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"]}
+
+OBS_RENAME_MAP = {
+    "Wind": {
+        "wind_speed_set_1": "obs_wind_speed_kts",
+        "wind_direction_set_1": "obs_wind_dir_deg",
+        "wind_gust_set_1": "obs_wind_gust_kts"
+    }
+}
 
 NETWORK = "1,107,90,179,200,286,3004"
 
@@ -50,11 +61,11 @@ MAX_RETRIES = 5
 ################### Model Params ###################################
 MODEL = 'nbm'
 
-HERBIE_MODELS = ['hrrrak','nbm','urma_ak','rtma_ak','gfs']
+HERBIE_MODELS = ['hrrr','nbm','urma','rtma','gfs']
 
 HERBIE_PRODUCTS = {'nbm':'ak',
 			'gfs':'pgrb2.0p25',
-			'hrrrak':'sfc',
+			'hrrr':'sfc',
 			'rtma_ak':'ges',
 			'urma_ak':'ges'
 			}
@@ -62,28 +73,39 @@ HERBIE_PRODUCTS = {'nbm':'ak',
 HERBIE_FORECASTS = {
 		'nbm':[5,11,17,23,29,35,41,47,53,59,65,71,83,95,107,119,131,143,155,167],
 		'gfs':[24,48,72,96],
-		'hrrrak':[12,24,36],
-		'rtma_ak':[0],  # hourly run, no fcsts, just analysis
-		'urma_ak':[0],  # same as rtma, no fcsts, just analysis
+		'hrrr':[12,18,24,30,36,42,48],
+		'rtma':[0],  # hourly run, no fcsts, just analysis
+		'urma':[0],  # same as rtma, no fcsts, just analysis
 		}
 
-HERBIE_CYCLES = {"nbm": "6h", "hrrrak": "3h", "urma_ak": "3h", "gfs": "6h", "rtma_ak": "3h"}
+HERBIE_CYCLES = {"nbm": "6h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
 ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10', 'i10fg']}}
 
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
-								   'hrrrak': [':[UV]GRD:10 m above',':GUST:']}}
+								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
+                                   'urma': []}}
+
+HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m above ground']}}
+
+HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'hrrr': ['ens std dev']}}
 
 HERBIE_RENAME_MAP = {
     "Wind": {
         "nbm": {
-            "si10": "wind_speed_kt",
             "wdir10": "wind_dir_deg",
+            "si10": "wind_speed_kt",
             "i10fg": "wind_gust_kt"
         },
-        "urma_ak": {
+        "urma": {
+            "wdir10": "wind_dir_deg",
+            "si10": "wind_speed_kt",
+            "i10fg": "wind_gust_kt"
+        },
+        "hrrr": {
             "u10": "u_wind",
-            "v10": "v_wind"
+            "v10": "v_wind",
+            "gust": "wind_gust_kt"
         }
     }
 }
@@ -94,9 +116,14 @@ HERBIE_UNIT_CONVERSIONS = {
             "wind_speed_kt": 1.94384,
             "wind_gust_kt": 1.94384
         },
-        "urma_ak": {
+        "urma": {
+            "wind_speed_kt": 1.94384,
+            "wind_gust_kt": 1.94384
+        },
+        "hrrr": {
             "u_wind": 1.94384,
-            "v_wind": 1.94384
+            "v_wind": 1.94384,
+            "wind_gust_kt": 1.9484
         }
     }
 }
@@ -156,9 +183,18 @@ NDFD_S3_URL = "s3://alaska-verification/ndfd/"
 
 NBM_S3_URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com/"
 
-S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/", "nbm": "s3://alaska-verification/nbm/"}
+S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/",
+            "nbm": "s3://alaska-verification/nbm/",
+              "obs": "s3://alaska-verification/obs/",
+                'hrrr': "s3://alaska-verification/hrrr/",
+                'urma': "s3://alaska-verification/urma/"
 
-MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com"}
+              }
+
+MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
+               'hrrr':'https://noaa-hrrr-bdp-pds.s3.amazonaws.com',
+                 'urma': 'https://noaa-urma-pds.s3.amazonaws.com'
+                 }
 
 
 #################### Processing Params ########################

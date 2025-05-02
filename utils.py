@@ -1,6 +1,8 @@
 import os
 import sys
 import re
+import tempfile
+import shutil
 import numpy as np
 import pandas as pd
 import requests
@@ -191,10 +193,20 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", do
     Returns:
     - list[str] — HTTPS URLs to GRIB2 files
     """
+    if domain == "ak":
+        full_domain = "alaska"
+    elif domain == "co":
+        full_domain = "conus"
+    elif domain == "hi":
+        full_domain = "hawaii"
     #base_url = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
     init_times = pd.date_range(start=start, end=end, freq=cycle)
     if model == "nbm":
         designator = "blend"
+    elif model == 'hrrr':
+        designator = 'hrrr'
+    elif model == 'urma':
+        designator = f'{domain}urma'
     else:
         print(f"url formatting for {base_url} for {model} not implemented. Check file name on AWS such as 'blend.t12z.f024.ak.grib2'.")
         raise NotImplementedError
@@ -203,118 +215,230 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", do
     for init in init_times:
         init_date = init.strftime("%Y%m%d")
         init_hour = init.strftime("%H")
-        for fh in fcst_hours:
-            fxx = f"f{fh:03d}"
-            relative_path = f"{designator}.{init_date}/{init_hour}/core/{designator}.t{init_hour}z.core.{fxx}.{domain}.grib2"
+        # skipping forecast hours if urma
+        if model == 'urma':
+            relative_path = f"{designator}.{init_date}/{designator}.t{int(init_hour):02d}z.2dvaranl_ndfd_3p0.grb2"
             full_url = f"{base_url}/{relative_path}"
-            idx_url = full_url + ".idx"
-
             try:
-                r = requests.head(idx_url, timeout=5)
+                r = requests.head(full_url, timeout=5)
                 if r.ok:
                     file_urls.append(full_url)
                 else:
-                    print(f"⚠️ Missing: {idx_url} — {r.status_code}")
+                    print(f"⚠️ Missing: {full_url} — {r.status_code}")
             except requests.exceptions.RequestException as e:
                 print(f"⚠️ Error accessing {idx_url}: {e}")
+        else:
+            for fh in fcst_hours:
+                if model == 'nbm':
+                    fxx = f"f{fh:03d}"
+                    relative_path = f"{designator}.{init_date}/{init_hour}/core/{designator}.t{init_hour}z.core.{fxx}.{domain}.grib2"
+                elif model == 'hrrr':
+                    fxx = f"f{fh:02d}"
+                    relative_path = f"{designator}.{init_date}/{full_domain}/{designator}.t{init_hour}z.wrf{config.HERBIE_PRODUCTS[config.MODEL]}{fxx}.{domain}.grib2"
+                full_url = f"{base_url}/{relative_path}"
+                idx_url = full_url + ".idx"
+
+                try:
+                    r = requests.head(idx_url, timeout=5)
+                    if r.ok:
+                        file_urls.append(full_url)
+                    else:
+                        print(f"⚠️ Missing: {idx_url} — {r.status_code}")
+                except requests.exceptions.RequestException as e:
+                    print(f"⚠️ Error accessing {idx_url}: {e}")
     #print(f"File urls are: {file_urls}")
     return file_urls
 
-def download_subset(remote_url, remote_file, local_filename, search_strings):
+def download_subset(remote_url, local_filename, search_strings, model, require_all_matches=True,
+                     required_phrases=None, exclude_phrases=None):
     """
-    Download subset of GRIB2 file based on .idx entries matching search_strings.
+    Download a subset of a GRIB2 file based on .idx entries matching search_strings.
 
-    Parameters:
-    - remote_url: full HTTPS URL to GRIB2 file
-    - remote_file: name of file (for naming output file)
-    - local_filename: local file name to save subset
-    - search_strings: list of strings to match in .idx lines (e.g., [":WIND:10 m above", ":WDIR:10 m above"])
+    Args:
+        remote_url (str): Full URL to remote .grib2 file (not .idx)
+        local_filename (str): Local path to save subset
+        search_strings (list of str): Substring search matches (e.g., ":WIND:10 m above")
+        require_all_matches (bool): If True, require all search_strings to match
+        required_phrases (list of str, optional): Must appear in matching lines
+        exclude_phrases (list of str, optional): If present in line, skip
+    Returns:
+        local_filename (str) if successful, None otherwise
     """
-    print("  > Downloading a subset of NBM gribs")
-    #print("🧪 Search strings received:", search_strings)
-    #print(search_string)
-    #sys.exit()
-    local_file = os.path.join("nbm", local_filename)
-    os.makedirs(os.path.dirname(local_file), exist_ok=True)
+    print(f"  > Downloading subset for {os.path.basename(remote_url)}")
+    print(f"🧪 Search strings: {search_strings}")
+
+    #local_file = os.path.join(model, local_filename)
+    os.makedirs(os.path.dirname(local_filename), exist_ok=True)
 
     idx_url = remote_url + ".idx"
     r = requests.get(idx_url)
     if not r.ok:
-        print(f'     ❌ SORRY! Could not get index file: {idx_url} ({r.status_code} {r.reason})')
+        print(f'     ❌ Could not get index file: {idx_url} ({r.status_code} {r.reason})')
         return None
 
     lines = r.text.strip().split('\n')
-    expr = re.compile("|".join(re.escape(s) for s in search_strings))
+    exprs = {s: re.compile(re.escape(s)) for s in search_strings}
 
-    byte_ranges = {}
+    matched_ranges = {}
+    matched_vars = set()
+
     for n, line in enumerate(lines, start=1):
-        if "ens std dev" in line:
-            continue  # skip ensemble standard deviation entries
+        if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
+            continue
 
-        if expr.search(line):
-            parts = line.split(':')
-            rangestart = int(parts[1])
+        #if required_phrases and not all(phrase in line for phrase in required_phrases):
+        #    continue
 
-            # Use next line's byte offset as range end
-            if n < len(lines):
-                parts_next = lines[n].split(':')
-                rangeend = int(parts_next[1])
+        for search_str, expr in exprs.items():
+            if expr.search(line):
+                matched_vars.add(search_str)
+                parts = line.split(':')
+                rangestart = int(parts[1])
+
+                # End byte: either next line's start byte, or EOF
+                if n < len(lines):
+                    parts_next = lines[n].split(':')
+                    rangeend = int(parts_next[1]) - 1
+                else:
+                    rangeend = ''
+
+                matched_ranges[f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'] = line
+
+    # Check matches
+    if require_all_matches and len(matched_vars) != len(search_strings):
+        print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
+        return None
+
+    if not matched_ranges:
+        print(f'      ❌ No matches found for {search_strings}')
+        return None
+
+    # Now download the matching byte ranges
+    with open(local_filename, 'wb') as f_out:
+        for byteRange in matched_ranges.keys():
+            headers = {'Range': f'bytes=' + byteRange}
+            r = requests.get(remote_url, headers=headers)
+            if r.status_code in (200, 206):
+                f_out.write(r.content)
             else:
-                rangeend = ''  # last entry, read to end
+                print(f"      ❌ Failed to download byte range {byteRange}")
+                return None
 
-            byte_ranges[f'{rangestart}-{rangeend}'] = line
+    print(f'      ✅ Downloaded [{len(matched_ranges)}] fields from {os.path.basename(remote_url)} → {local_filename}')
+    return local_filename if os.path.exists(local_filename) else None
 
-    if not byte_ranges:
-        print(f'      ❌ Unsuccessful! No matches for {search_strings}')
-        return None
-
-    for i, (byteRange, line) in enumerate(byte_ranges.items()):
-        if i == 0:
-            curl = f'curl -s --range {byteRange} {remote_url} > {local_file}'
-        else:
-            curl = f'curl -s --range {byteRange} {remote_url} >> {local_file}'
-        os.system(curl)
-
-    if os.path.exists(local_file):
-        print(f'      ✅ Success! Matched [{len(byte_ranges)}] fields from {remote_file} → {local_file}')
-        return local_file
+def parse_date_and_time_from_url(remote_url, model):
+    url_parts = remote_url.split('/')
+    if model == 'nbm':
+        return url_parts[-4], url_parts[-3]
+    elif model == 'hrrr':
+        return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
+    elif model == 'urma':
+        return url_parts[-2].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     else:
-        print(f'      ❌ Failed to save subset to {local_file}')
-        return None
+        raise ValueError(f"Unsupported date/time header parsing for model: {model}")
 
-
-def extract_model_subset_parallel(
-    file_urls, station_df, search_strings, element, model, config
-):
+def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
     rename_map = config.HERBIE_RENAME_MAP[element][model]
     conversion_map = config.HERBIE_UNIT_CONVERSIONS[element].get(model, {})
-    #print(search_strings)
-    #sys.exit()
-    def process_file(remote_url):
-        records = []
-        try:
-            remote_file = os.path.basename(remote_url)
-            local_file = download_subset(
+    
+    # Stage 1: Download all files in parallel
+    local_files = []
+    download_results = {}
+    temp_download_dir = tempfile.mkdtemp(prefix="model_downloads_")
+    print(f"📁 Using temp folder: {temp_download_dir}")
+
+    def download_file(remote_url):
+        remote_file = os.path.basename(remote_url)
+        date_tag, time_tag = parse_date_and_time_from_url(remote_url, model)
+        #print(f"Date tag is: {date_tag} and time tag is {time_tag}")
+        local_file = os.path.join(temp_download_dir, f"{date_tag}_{time_tag}_{remote_file}")  # or whatever your directory is
+        if model == 'urma':
+            try:
+                r = requests.get(remote_url)
+                if r.status_code in (200, 206):
+                    with open(local_file, 'wb') as f:
+                        f.write(r.content)
+                    return (remote_url, local_file)
+                else:
+                    print(f"❌ Failed to download URMA file: {remote_url}")
+                    return (remote_url, None)
+            except Exception as e:
+                print(f"❌ Exception downloading URMA file: {e}")
+                return (remote_url, None)
+        else:          
+            downloaded_file = download_subset(
                 remote_url=remote_url,
-                remote_file=remote_file,
-                local_filename=remote_file,
-                search_strings=search_strings
+                local_filename=local_file,
+                search_strings=search_strings,
+                model=model,
+                require_all_matches=True,
+                required_phrases=config.HERBIE_REQUIRED_PHRASES[element][model],
+                exclude_phrases=config.HERBIE_EXCLUDE_PHRASES[element][model],
             )
+            return (remote_url, downloaded_file)
 
-            if not os.path.exists(local_file):
-                return pd.DataFrame()
+    print("📥 Starting parallel downloads...")
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
+        futures = [executor.submit(download_file, url) for url in file_urls]
+        downloaded_files = []
+        for i, future in enumerate(as_completed(futures), 1):
+            remote_url, local_file = future.result()
+            if local_file:
+                downloaded_files.append(local_file)
+            print(f"✅ Downloaded {i}/{len(file_urls)} files.")
 
-            ds = xr.open_dataset(
-                local_file,
-                engine="cfgrib",
-                backend_kwargs={"indexpath": ""},
-                decode_timedelta=True
-            )
+    print(f"📂 {len(downloaded_files)} files downloaded. Now starting data extraction...")
+
+    # Stage 2: Process each file (could also be parallel if needed, but safe to do serially)
+    station_index_cache = {}  # move it here so it's scoped properly
+    all_records = []
+    
+    for local_file in downloaded_files:
+        print(f"Now processing {local_file}...")
+        try:
+            if model in ['nbm','hrrr']:
+                ds = xr.open_dataset(
+                    local_file,
+                    engine="cfgrib",
+                    backend_kwargs={
+                        "indexpath": "",
+                        "errors": "ignore"
+                        },
+                    decode_timedelta=True,
+                )
+            else:
+                ds = xr.open_dataset(
+                    local_file,
+                    engine="cfgrib",
+                    backend_kwargs={
+                        "filter_by_keys": {
+                            "typeOfLevel": "heightAboveGround",
+                            "stepType": "instant",
+                            "level": 10
+                        },
+                        "indexpath": "",
+                        "errors": "ignore"
+                    },
+                    decode_timedelta=True
+                )
 
             lats = ds.latitude.values
-            lons = ds.longitude.values - 360
+            lons = ds.longitude.values - 360  # wrap longitude
             valid_time = pd.to_datetime(ds.valid_time.values)
-            forecast_hour = int(re.search(r"\.f(\d{3})\.", remote_file).group(1))
+            if model == 'nbm':
+                forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
+            elif model == 'hrrr':
+                match = re.search(r"f(\d{2,3})", os.path.basename(local_file))
+                if match:
+                    forecast_hour = int(match.group(1))
+                else:
+                    raise ValueError(f"Could not extract forecast hour from {local_file}")
+            elif model == 'urma':
+                forecast_hour = 0
+            else:
+                print(f'File pattern matching not yet set up for {model}')
+                raise NotImplementedError
 
             for _, row in station_df.iterrows():
                 stid = row["stid"]
@@ -332,33 +456,55 @@ def extract_model_subset_parallel(
                     "valid_time": valid_time,
                     "forecast_hour": forecast_hour,
                 }
+                if model == 'nbm' or model == 'urma':
+                    for grib_var, renamed_var in rename_map.items():
+                        if grib_var not in ds:
+                            continue
+                        val = ds[grib_var].values[iy, ix]
+                        factor = conversion_map.get(renamed_var, 1.0)
+                        if pd.notnull(val):
+                            if "deg" in renamed_var:
+                                record[renamed_var] = round(float(val), 0)
+                            else:
+                                record[renamed_var] = round(float(val * factor), 2)
 
-                for grib_var, renamed_var in rename_map.items():
-                    if grib_var not in ds:
-                        continue
-                    val = ds[grib_var].values[iy, ix]
-                    factor = conversion_map.get(renamed_var, 1.0)
-                    if pd.notnull(val):
-                        if "deg" in renamed_var:
-                            record[renamed_var] = round(float(val), 0)
+                    all_records.append(record)
+
+                elif model == 'hrrr':
+                    u = v = None  # Default to None in case either component is missing
+
+                    for grib_var, renamed_var in rename_map.items():
+                        if grib_var not in ds:
+                            continue
+                        val = ds[grib_var].values[iy, ix]
+                        factor = conversion_map.get(renamed_var, 1.0)
+                        val = val * factor if pd.notnull(val) else None
+
+                        if renamed_var == "u_wind":
+                            u = val
+                        elif renamed_var == "v_wind":
+                            v = val
                         else:
-                            record[renamed_var] = round(float(val * factor), 2)
+                            if val is not None:
+                                record[renamed_var] = round(float(val), 2)
 
-                records.append(record)
+                    # If both u and v exist, compute speed and direction
+                    if u is not None and v is not None:
+                        speed = np.sqrt(u**2 + v**2)
+                        direction = (270 - np.degrees(np.arctan2(v, u))) % 360
+                        record["wind_dir_deg"] = round(float(direction), 0)
+                        record["wind_speed_kt"] = round(float(speed), 2)
 
-            Path(local_file).unlink(missing_ok=True)
+                    all_records.append(record)         
         except Exception as e:
-            print(f"❌ Failed to process {remote_url}: {e}")
-        return pd.DataFrame.from_records(records)
+           print(f"❌ Failed to process {local_file}: {e}")
+    # cleaning up
+    for local_file in downloaded_files:
+        Path(local_file).unlink(missing_ok=True)
 
-    results = []
-    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
-        futures = [executor.submit(process_file, url) for url in file_urls]
-        for i, future in enumerate(as_completed(futures), 1):
-            results.append(future.result())
-            print(f"✅ Completed {i}/{len(file_urls)} files.")
+    shutil.rmtree(temp_download_dir)
+    return pd.DataFrame.from_records(all_records)
 
-    return pd.concat(results, ignore_index=True)
 
 ## TODO ADD hrrrak, urma, rrfs
 ## TODO ADD temp, precip vars
