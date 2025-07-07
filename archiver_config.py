@@ -3,7 +3,7 @@ import os
 
 USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
-ELEMENT = 'Wind'
+ELEMENT = 'Precip24hr'
 
 ######################### Directories #################################
 
@@ -15,7 +15,8 @@ MODEL_DIR = os.path.join(HOME, 'model')
 
 TMP = os.path.join(HOME, 'tmp_cache')
 
-
+for directory in [OBS, MODEL_DIR, TMP]:
+    os.makedirs(directory, exist_ok=True)
 ######################## File Names #################################
 
 METADATA = "alaska_obs_metadata.csv"
@@ -36,7 +37,8 @@ STATE = "ak"
 
 HFMETAR = "0"
 
-OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"]}
+OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
+            "Precip24hr": ["precip_intervals", "precip_accum"]}
 
 OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"]}
 
@@ -59,11 +61,12 @@ INITIAL_WAIT = 1
 MAX_RETRIES = 5
 
 ################### Model Params ###################################
-MODEL = 'nbm'
+MODEL = 'nbmqmd'
 
-HERBIE_MODELS = ['hrrr','nbm','urma','rtma','gfs']
+HERBIE_MODELS = ['hrrr','nbm','nbmqmd','urma','rtma','gfs']
 
 HERBIE_PRODUCTS = {'nbm':'ak',
+            'nbmqmd': 'ak',
 			'gfs':'pgrb2.0p25',
 			'hrrr':'sfc',
 			'rtma_ak':'ges',
@@ -72,23 +75,28 @@ HERBIE_PRODUCTS = {'nbm':'ak',
 
 HERBIE_FORECASTS = {
 		'nbm':[5,11,17,23,29,35,41,47,53,59,65,71,83,95,107,119,131,143,155,167],
+        'nbmqmd': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
 		'gfs':[24,48,72,96],
 		'hrrr':[12,18,24,30,36,42,48],
 		'rtma':[0],  # hourly run, no fcsts, just analysis
 		'urma':[0],  # same as rtma, no fcsts, just analysis
 		}
 
-HERBIE_CYCLES = {"nbm": "6h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
+HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
 ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10', 'i10fg']}}
 
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
-                                   'urma': []}}
+                                   'urma': []},
+                        'Precip24hr': {'nbmqmd': [':APCP:surface:']},
+                        'MaxT': {'nbmqmd': [':TMAX:2 m above ground:']}}
 
-HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m above ground']}}
+HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m above ground']},
+                           'Precip24hr': {'nbmqmd': ['APCP:surface']}}
 
-HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'hrrr': ['ens std dev']}}
+HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'hrrr': ['ens std dev']},
+                          'Precip24hr': {'nbmqmd': ['ens std dev']}}
 
 HERBIE_RENAME_MAP = {
     "Wind": {
@@ -107,6 +115,11 @@ HERBIE_RENAME_MAP = {
             "v10": "v_wind",
             "gust": "wind_gust_kt"
         }
+    },
+    "Precip24hr": {
+        "nbmqmd": {
+            "apcp": "precip_accum_24hr"
+        }
     }
 }
 
@@ -124,6 +137,11 @@ HERBIE_UNIT_CONVERSIONS = {
             "u_wind": 1.94384,
             "v_wind": 1.94384,
             "wind_gust_kt": 1.9484
+        }
+    },
+    "Precip24hr": {
+        "nbmqmd": {
+            "precip_accum_24hr": 25.4
         }
     }
 }
@@ -152,6 +170,9 @@ HERBIE_OUTPUT_COLUMNS = {
     },
     "Precipitation": {
         "nbm": ["precip_in"]
+    },
+    "Precip24hr": {
+        "nbmqmd": ["precip_24hr_percentile_5", "precip_24hr_percentile_10","precip_24hr_percentile_25","precip_24hr_percentile_50","precip_24hr_percentile_75","precip_24hr_percentile_90","precip_24hr_percentile_95"]
     }
 }
 
@@ -192,6 +213,7 @@ S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/",
               }
 
 MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
+              'nbmqmd': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
                'hrrr':'https://noaa-hrrr-bdp-pds.s3.amazonaws.com',
                  'urma': 'https://noaa-urma-pds.s3.amazonaws.com'
                  }

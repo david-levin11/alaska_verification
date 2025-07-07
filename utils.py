@@ -3,6 +3,7 @@ import sys
 import re
 import tempfile
 import shutil
+import pygrib
 import numpy as np
 import pandas as pd
 import requests
@@ -23,10 +24,35 @@ def ll_to_index(loclat, loclon, datalats, datalons):
     latlon_idx = np.unravel_index(latlon_idx_flat, datalons.shape)
     return latlon_idx
 
-def create_wind_metadata(url, token, state, networks, vars, obrange):
+def create_wind_metadata(url, token, state, networks, vars, obrange, precip=0):
+    if precip==0:
+        params = {
+            "token": token,
+            "vars": vars,
+            "obrange": obrange,
+            "network": networks,
+            "state": state,
+            "output": "json"
+        }
+    else:
+        params = {
+            "token": token,
+            "precip": precip,
+            "obrange": obrange,
+            "network": networks,
+            "state": state,
+            "output": "json"
+        }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        raise Exception(f"Failed to fetch metadata: {response.status_code}")
+
+def create_precip_metadata(url, token, state, networks, obrange):
     params = {
         "token": token,
-        "vars": vars,
+        "precip": "1",
         "obrange": obrange,
         "network": networks,
         "state": state,
@@ -186,7 +212,7 @@ def generate_chunked_date_range(model, chunk_start, chunk_end, config):
     cycle = config.HERBIE_CYCLES[model]
     return pd.date_range(start=chunk_start, end=chunk_end, freq=cycle)
 
-def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", domain="ak"):
+def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model="nbm", domain="ak"):
     """
     Generate available NBM HTTPS URLs by checking if the index file (.idx) exists.
 
@@ -203,10 +229,14 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", do
     init_times = pd.date_range(start=start, end=end, freq=cycle)
     if model == "nbm":
         designator = "blend"
+        suite = "core"
     elif model == 'hrrr':
         designator = 'hrrr'
     elif model == 'urma':
         designator = f'{domain}urma'
+    elif model == 'nbmqmd':
+        designator = "blend"
+        suite = "qmd"
     else:
         print(f"url formatting for {base_url} for {model} not implemented. Check file name on AWS such as 'blend.t12z.f024.ak.grib2'.")
         raise NotImplementedError
@@ -231,7 +261,10 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", do
             for fh in fcst_hours:
                 if model == 'nbm':
                     fxx = f"f{fh:03d}"
-                    relative_path = f"{designator}.{init_date}/{init_hour}/core/{designator}.t{init_hour}z.core.{fxx}.{domain}.grib2"
+                    relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
+                elif model == 'nbmqmd':
+                    fxx = f"f{fh:03d}"
+                    relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
                 elif model == 'hrrr':
                     fxx = f"f{fh:02d}"
                     relative_path = f"{designator}.{init_date}/{full_domain}/{designator}.t{init_hour}z.wrf{config.HERBIE_PRODUCTS[config.MODEL]}{fxx}.{domain}.grib2"
@@ -249,27 +282,97 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, model="nbm", do
     #print(f"File urls are: {file_urls}")
     return file_urls
 
-def download_subset(remote_url, local_filename, search_strings, model, require_all_matches=True,
-                     required_phrases=None, exclude_phrases=None):
+# def download_subset(remote_url, local_filename, search_strings, model, require_all_matches=True,
+#                      required_phrases=None, exclude_phrases=None):
+#     """
+#     Download a subset of a GRIB2 file based on .idx entries matching search_strings.
+
+#     Args:
+#         remote_url (str): Full URL to remote .grib2 file (not .idx)
+#         local_filename (str): Local path to save subset
+#         search_strings (list of str): Substring search matches (e.g., ":WIND:10 m above")
+#         require_all_matches (bool): If True, require all search_strings to match
+#         required_phrases (list of str, optional): Must appear in matching lines
+#         exclude_phrases (list of str, optional): If present in line, skip
+#     Returns:
+#         local_filename (str) if successful, None otherwise
+#     """
+#     print(f"  > Downloading subset for {os.path.basename(remote_url)}")
+#     print(f"🧪 Search strings: {search_strings}")
+
+#     #local_file = os.path.join(model, local_filename)
+#     os.makedirs(os.path.dirname(local_filename), exist_ok=True)
+
+#     idx_url = remote_url + ".idx"
+#     r = requests.get(idx_url)
+#     if not r.ok:
+#         print(f'     ❌ Could not get index file: {idx_url} ({r.status_code} {r.reason})')
+#         return None
+
+#     lines = r.text.strip().split('\n')
+#     exprs = {s: re.compile(re.escape(s)) for s in search_strings}
+
+#     matched_ranges = {}
+#     matched_vars = set()
+
+#     for n, line in enumerate(lines, start=1):
+#         if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
+#             continue
+
+#         #if required_phrases and not all(phrase in line for phrase in required_phrases):
+#         #    continue
+
+#         for search_str, expr in exprs.items():
+#             if expr.search(line):
+#                 matched_vars.add(search_str)
+#                 parts = line.split(':')
+#                 rangestart = int(parts[1])
+
+#                 # End byte: either next line's start byte, or EOF
+#                 if n < len(lines):
+#                     parts_next = lines[n].split(':')
+#                     rangeend = int(parts_next[1]) - 1
+#                 else:
+#                     rangeend = ''
+
+#                 matched_ranges[f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'] = line
+
+#     # Check matches
+#     if require_all_matches and len(matched_vars) != len(search_strings):
+#         print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
+#         return None
+
+#     if not matched_ranges:
+#         print(f'      ❌ No matches found for {search_strings}')
+#         return None
+
+#     # Now download the matching byte ranges
+#     with open(local_filename, 'wb') as f_out:
+#         for byteRange in matched_ranges.keys():
+#             headers = {'Range': f'bytes=' + byteRange}
+#             r = requests.get(remote_url, headers=headers)
+#             if r.status_code in (200, 206):
+#                 f_out.write(r.content)
+#             else:
+#                 print(f"      ❌ Failed to download byte range {byteRange}")
+#                 return None
+
+#     print(f'      ✅ Downloaded [{len(matched_ranges)}] fields from {os.path.basename(remote_url)} → {local_filename}')
+#     return local_filename if os.path.exists(local_filename) else None
+
+def download_subset(remote_url, local_filename, search_strings, model,
+                    require_all_matches=True,
+                    required_phrases=None,
+                    exclude_phrases=None):
     """
     Download a subset of a GRIB2 file based on .idx entries matching search_strings.
 
-    Args:
-        remote_url (str): Full URL to remote .grib2 file (not .idx)
-        local_filename (str): Local path to save subset
-        search_strings (list of str): Substring search matches (e.g., ":WIND:10 m above")
-        require_all_matches (bool): If True, require all search_strings to match
-        required_phrases (list of str, optional): Must appear in matching lines
-        exclude_phrases (list of str, optional): If present in line, skip
-    Returns:
-        local_filename (str) if successful, None otherwise
+    If model == "nbmqpd", apply special logic to match 24-hr APCP percentiles.
     """
     print(f"  > Downloading subset for {os.path.basename(remote_url)}")
-    print(f"🧪 Search strings: {search_strings}")
-
-    #local_file = os.path.join(model, local_filename)
     os.makedirs(os.path.dirname(local_filename), exist_ok=True)
 
+    # Download .idx file
     idx_url = remote_url + ".idx"
     r = requests.get(idx_url)
     if not r.ok:
@@ -277,47 +380,85 @@ def download_subset(remote_url, local_filename, search_strings, model, require_a
         return None
 
     lines = r.text.strip().split('\n')
-    exprs = {s: re.compile(re.escape(s)) for s in search_strings}
-
     matched_ranges = {}
-    matched_vars = set()
 
-    for n, line in enumerate(lines, start=1):
-        if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
-            continue
+    # Special handling for NBM QPF percentiles
+    if model == "nbmqmd":
+        # Extract forecast hour from filename (e.g., f060)
+        base = os.path.basename(remote_url)
+        fcst_match = re.search(r"f(\d{3})", base)
+        if not fcst_match:
+            print("     ❌ Could not determine forecast hour from filename.")
+            return None
+        fcst_hour = int(fcst_match.group(1))
+        tr_start = fcst_hour - 24
+        tr_end = fcst_hour
+        accum_str = f"{tr_start}-{tr_end} hour acc fcst"
 
-        #if required_phrases and not all(phrase in line for phrase in required_phrases):
-        #    continue
+        # Target percentiles
+        target_levels = {"5% level", "10% level", "25% level", "50% level", "75% level", "90% level", "95% level"}
 
-        for search_str, expr in exprs.items():
-            if expr.search(line):
-                matched_vars.add(search_str)
-                parts = line.split(':')
-                rangestart = int(parts[1])
+        # Compile search patterns
+        search_exprs = [re.escape(s) for s in search_strings]
+        search_pattern = re.compile("|".join(search_exprs))
 
-                # End byte: either next line's start byte, or EOF
-                if n < len(lines):
-                    parts_next = lines[n].split(':')
-                    rangeend = int(parts_next[1]) - 1
-                else:
-                    rangeend = ''
+        for n, line in enumerate(lines, start=1):
+            if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
+                continue
+            if not search_pattern.search(line):
+                continue
+            if accum_str not in line:
+                continue
+            if not any(level in line for level in target_levels):
+                continue
 
-                matched_ranges[f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'] = line
+            parts = line.split(':')
+            rangestart = int(parts[1])
 
-    # Check matches
-    if require_all_matches and len(matched_vars) != len(search_strings):
-        print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
-        return None
+            if n < len(lines):
+                parts_next = lines[n].split(':')
+                rangeend = int(parts_next[1]) - 1
+            else:
+                rangeend = ''
 
+            byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
+            matched_ranges[byte_range] = line
+
+    else:
+        # Generic logic for other models: just match search strings
+        exprs = {s: re.compile(re.escape(s)) for s in search_strings}
+        matched_vars = set()
+
+        for n, line in enumerate(lines, start=1):
+            if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
+                continue
+
+            for search_str, expr in exprs.items():
+                if expr.search(line):
+                    matched_vars.add(search_str)
+                    parts = line.split(':')
+                    rangestart = int(parts[1])
+                    if n < len(lines):
+                        parts_next = lines[n].split(':')
+                        rangeend = int(parts_next[1]) - 1
+                    else:
+                        rangeend = ''
+                    byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
+                    matched_ranges[byte_range] = line
+
+        if require_all_matches and len(matched_vars) != len(search_strings):
+            print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
+            return None
+
+    # Check if anything was found
     if not matched_ranges:
         print(f'      ❌ No matches found for {search_strings}')
         return None
 
-    # Now download the matching byte ranges
+    # Download GRIB subset
     with open(local_filename, 'wb') as f_out:
         for byteRange in matched_ranges.keys():
-            headers = {'Range': f'bytes=' + byteRange}
-            r = requests.get(remote_url, headers=headers)
+            r = requests.get(remote_url, headers={'Range': f'bytes=' + byteRange})
             if r.status_code in (200, 206):
                 f_out.write(r.content)
             else:
@@ -330,6 +471,8 @@ def download_subset(remote_url, local_filename, search_strings, model, require_a
 def parse_date_and_time_from_url(remote_url, model):
     url_parts = remote_url.split('/')
     if model == 'nbm':
+        return url_parts[-4], url_parts[-3]
+    elif model == 'nbmqmd': 
         return url_parts[-4], url_parts[-3]
     elif model == 'hrrr':
         return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
@@ -394,10 +537,10 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     station_index_cache = {}  # move it here so it's scoped properly
     all_records = []
     
-    for local_file in downloaded_files:
+    for i, local_file in enumerate(downloaded_files):
         print(f"Now processing {local_file}...")
         try:
-            if model in ['nbm','hrrr']:
+            if model in ['nbm','hrrr', 'nbmqmd']:
                 ds = xr.open_dataset(
                     local_file,
                     engine="cfgrib",
@@ -422,11 +565,12 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                     },
                     decode_timedelta=True
                 )
-
             lats = ds.latitude.values
             lons = ds.longitude.values - 360  # wrap longitude
             valid_time = pd.to_datetime(ds.valid_time.values)
             if model == 'nbm':
+                forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
+            elif model == 'nbmqmd':
                 forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
             elif model == 'hrrr':
                 match = re.search(r"f(\d{2,3})", os.path.basename(local_file))

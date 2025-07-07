@@ -4,3 +4,4 @@ tmp/
 obs/
 tmp_cache/
 __pycache__/
+venv/
