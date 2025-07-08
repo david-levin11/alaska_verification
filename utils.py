@@ -11,10 +11,30 @@ import fsspec
 import xarray as xr
 from datetime import datetime
 from pathlib import Path
+from scipy.spatial import cKDTree
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import archiver_config as config  # Update 'your_module' with actual config import path
 
 station_index_cache = {}
+
+def build_kdtree(lats, lons):
+    """
+    Build a cKDTree from 2D lat/lon arrays.
+    Returns:
+        tree: cKDTree object
+        shape: original shape of the lat/lon grids
+    """
+    latlon_points = np.column_stack((lats.ravel(), lons.ravel()))
+    tree = cKDTree(latlon_points)
+    return tree, lats.shape
+
+def query_kdtree(tree, shape, station_lat, station_lon):
+    """
+    Query cKDTree and return 2D grid indices (iy, ix)
+    """
+    dist, idx = tree.query([station_lat, station_lon])
+    iy, ix = np.unravel_index(idx, shape)
+    return iy, ix
 
 def ll_to_index(loclat, loclon, datalats, datalons):
     abslat = np.abs(datalats - loclat)
@@ -488,7 +508,7 @@ def parse_date_and_time_from_url(remote_url, model):
 def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
     rename_map = config.HERBIE_RENAME_MAP[element][model]
     conversion_map = config.HERBIE_UNIT_CONVERSIONS[element].get(model, {})
-    
+    print(f"Conversion map is: {conversion_map}")
     # Stage 1: Download all files in parallel
     local_files = []
     download_results = {}
@@ -664,18 +684,21 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
 
             try:
                 if model == "nbmqmd":
+                    # Parse once
                     grbs = list(pygrib.open(local_file))
-
-                    # Extract forecast hour from filename
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
                     valid_time = pd.to_datetime(grbs[1].validDate)
+                    lats, lons = grbs[0].latlons()
+                    lons = lons - 360
 
-                    # Get lat/lon grid from the first message
-                    #sample = grbs.message(1)
-                    sample = grbs[0]
-                    lats, lons = sample.latlons()
-                    lons = lons - 360  # wrap to -180 to 180
+                    tree, grid_shape = build_kdtree(lats, lons)
+                    # Cache all GRIB values by percentile
+                    grib_fields = {}
+                    for g in grbs:
+                        if hasattr(g, "percentileValue"):
+                            grib_fields[int(g.percentileValue)] = g.values
 
+                    # Process all stations
                     for _, row in station_df.iterrows():
                         stid = row["stid"]
                         lat, lon = row["latitude"], row["longitude"]
@@ -683,7 +706,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         if stid in station_index_cache:
                             iy, ix = station_index_cache[stid]
                         else:
-                            iy, ix = ll_to_index(lat, lon, lats, lons)
+                            iy, ix = query_kdtree(tree, grid_shape, lat, lon)
                             station_index_cache[stid] = (iy, ix)
 
                         record = {
@@ -693,14 +716,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             "forecast_hour": forecast_hour,
                         }
 
-                        for g in grbs:
-                            if hasattr(g, "percentileValue"):
-                                perc = int(g.percentileValue)
-                                val = g.values[iy, ix]
-                                record[f"qpf_p{perc}"] = round(float(val * 0.0393701), 2)  # mm → inches
-
+                        for perc, values in grib_fields.items():
+                            if element == "Precip24hr":
+                                record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
+                            else:
+                                raise NotImplementedError(f"Unit conversions not set up for {element} in {model}.  Check HERBIE_UNIT_CONVERSIONS in archiver_config.py")
                         all_records.append(record)
-
+                else:
+                    raise NotImplementedError(f"Probabilistic file processing not yet set up for {model}")
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
     # cleaning up

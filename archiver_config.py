@@ -84,7 +84,8 @@ HERBIE_FORECASTS = {
 
 HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
-ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10', 'i10fg']}}
+ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10', 'i10fg']},
+                'Precip24hr': {'nbmqmd':[]}}
 
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
@@ -140,8 +141,7 @@ HERBIE_UNIT_CONVERSIONS = {
         }
     },
     "Precip24hr": {
-        "nbmqmd": {
-            "precip_accum_24hr": 25.4
+        "nbmqmd":  {"Precip24hr": 0.0393701
         }
     }
 }
@@ -208,7 +208,8 @@ S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/",
             "nbm": "s3://alaska-verification/nbm/",
               "obs": "s3://alaska-verification/obs/",
                 'hrrr': "s3://alaska-verification/hrrr/",
-                'urma': "s3://alaska-verification/urma/"
+                'urma': "s3://alaska-verification/urma/",
+                "nbmqmd": "s3://alaska-verification/nbmqmd/"
 
               }
 

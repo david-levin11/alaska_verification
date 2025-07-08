@@ -11,7 +11,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
 
     # Normalize to match config keys
     model = model_name.lower()
-    element_title = element.title()  # "wind" → "Wind", etc.
+    element_title = element.capitalize()  # "wind" → "Wind", etc.
 
     # Validate
     if model not in config.HERBIE_MODELS:
@@ -82,11 +82,11 @@ if __name__ == "__main__":
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
 
-    if args.model.lower() not in ['nbm', 'hrrr', 'urma']:
+    if args.model.lower() not in ['nbm', 'hrrr', 'urma', 'nbmqmd']:
         print(f"Archiving not yet set up for models other than nbm")
         raise NotImplementedError
-
-    if args.element.title() != "Wind":
+    #print(args.element.title())
+    if args.element.capitalize() not in ["Wind", "Precip24hr"]:
         print(f"Still working on setting up archiving for {args.element} for the {args.model}")
         raise NotImplementedError
 
