@@ -602,6 +602,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                     )
                 lats = ds.latitude.values
                 lons = ds.longitude.values - 360  # wrap longitude
+                tree, grid_shape = build_kdtree(lats, lons)
                 valid_time = pd.to_datetime(ds.valid_time.values)
                 if model == 'nbm':
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
@@ -624,9 +625,9 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                     lat, lon = row["latitude"], row["longitude"]
 
                     if stid in station_index_cache:
-                        iy, ix = station_index_cache[stid]
+                            iy, ix = station_index_cache[stid]
                     else:
-                        iy, ix = ll_to_index(lat, lon, lats, lons)
+                        iy, ix = query_kdtree(tree, grid_shape, lat, lon)
                         station_index_cache[stid] = (iy, ix)
 
                     record = {
