@@ -95,4 +95,4 @@ if __name__ == "__main__":
     files = archiver.fetch_file_list("2024-01-01 00:00:00", "2024-01-02 00:00:00")
     print(files)
     df = archiver.process_files(files)
-    print(df.head())
+    df.to_csv("test.csv")
