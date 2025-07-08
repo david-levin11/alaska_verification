@@ -93,6 +93,15 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
                         'Precip24hr': {'nbmqmd': [':APCP:surface:']},
                         'MaxT': {'nbmqmd': [':TMAX:2 m above ground:']}}
 
+QMD_CYCLES = {
+    'Precip24hr': {
+    'nbmqmd': 24
+    },
+    'Precip6hr': {
+        'nbmqmd': 6
+    }
+}
+
 HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m above ground']},
                            'Precip24hr': {'nbmqmd': ['APCP:surface']}}
 

@@ -380,7 +380,7 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
 #     print(f'      ✅ Downloaded [{len(matched_ranges)}] fields from {os.path.basename(remote_url)} → {local_filename}')
 #     return local_filename if os.path.exists(local_filename) else None
 
-def download_subset(remote_url, local_filename, search_strings, model,
+def download_subset(remote_url, local_filename, search_strings, model, element,
                     require_all_matches=True,
                     required_phrases=None,
                     exclude_phrases=None):
@@ -411,12 +411,14 @@ def download_subset(remote_url, local_filename, search_strings, model,
             print("     ❌ Could not determine forecast hour from filename.")
             return None
         fcst_hour = int(fcst_match.group(1))
-        tr_start = fcst_hour - 24
+        if element == 'Precip24hr':
+            tr_start = fcst_hour - 24
+        else:
+            raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
         tr_end = fcst_hour
         accum_str = f"{tr_start}-{tr_end} hour acc fcst"
 
         # Target percentiles
-        #target_levels = {"5% level", "10% level", "25% level", "50% level", "75% level", "90% level", "95% level"}
         # With this:
         target_perc_values = {5, 10, 25, 50, 75, 90, 95}
         # Compile search patterns
@@ -539,6 +541,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                 local_filename=local_file,
                 search_strings=search_strings,
                 model=model,
+                element=element,
                 require_all_matches=True,
                 required_phrases=config.HERBIE_REQUIRED_PHRASES[element][model],
                 exclude_phrases=config.HERBIE_EXCLUDE_PHRASES[element][model],
