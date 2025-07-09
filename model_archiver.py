@@ -15,7 +15,9 @@ class ModelArchiver(Archiver):
             self.station_df = self.ensure_metadata()
 
     def ensure_metadata(self):
-        meta_path = Path(self.config.OBS) / self.config.METADATA
+        print(f"Creating metadata for {self.wxelement}")
+        metadata = f'alaska_{self.wxelement}_obs_metadata.csv'
+        meta_path = Path(self.config.OBS) / metadata
         if not meta_path.exists():
             print(f"Creating metadata from {self.config.METADATA_URL}")
             meta_json = create_wind_metadata(
@@ -23,7 +25,7 @@ class ModelArchiver(Archiver):
                 self.config.API_KEY,
                 self.config.STATE,
                 self.config.NETWORK,
-                self.config.WIND_VARS,
+                self.config.OBS_VARS[self.wxelement],
                 self.start  # ✅ Use dynamic start date
             )
             meta_df = parse_metadata(meta_json)
@@ -33,7 +35,9 @@ class ModelArchiver(Archiver):
         return meta_df
 
     def ensure_metadata_precip(self):
-        meta_path = Path(self.config.OBS) / self.config.METADATA
+        print(f"Creating metadata for {self.wxelement}")
+        metadata = f'alaska_{self.wxelement}_obs_metadata.csv'
+        meta_path = Path(self.config.OBS) / metadata
         if not meta_path.exists():
             print(f"Creating metadata from {self.config.METADATA_URL}")
             meta_json = create_precip_metadata(
@@ -53,7 +57,7 @@ class ModelArchiver(Archiver):
         return get_model_file_list(
             start=start,
             end=end,
-            fcst_hours=self.config.HERBIE_FORECASTS[self.config.MODEL],
+            fcst_hours=self.config.HERBIE_FORECASTS[self.config.MODEL][self.wxelement],
             cycle=self.config.HERBIE_CYCLES[self.config.MODEL],
             base_url=self.config.MODEL_URLS[self.config.MODEL],
             element = self.config.ELEMENT,
@@ -90,9 +94,9 @@ class ModelArchiver(Archiver):
         # tr_start = fcst_hour - 24
         # tr_end = fcst_hour
         # accum_str = f"{tr_start}-{tr_end}
-# if __name__ == "__main__":
-#     archiver = ModelArchiver(config)
-#     files = archiver.fetch_file_list("2024-01-01 00:00:00", "2024-01-02 00:00:00")
-#     print(files)
-#     df = archiver.process_files(files)
-#     df.to_csv("test.csv")
+if __name__ == "__main__":
+    archiver = ModelArchiver(config)
+    files = archiver.fetch_file_list("2024-01-01 00:00:00", "2024-01-02 00:00:00")
+    print(files)
+    df = archiver.process_files(files)
+    df.to_csv("test.csv")

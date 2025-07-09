@@ -17,6 +17,10 @@ import archiver_config as config  # Update 'your_module' with actual config impo
 
 station_index_cache = {}
 
+def K_to_F(kelvin):
+  fahrenheit = 1.8*(kelvin-273)+32.
+  return fahrenheit
+
 def build_kdtree(lats, lons):
     """
     Build a cKDTree from 2D lat/lon arrays.
@@ -411,13 +415,15 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             print("     ❌ Could not determine forecast hour from filename.")
             return None
         fcst_hour = int(fcst_match.group(1))
+        tr_end = fcst_hour
         if element == 'Precip24hr':
             tr_start = fcst_hour - 24
+            accum_str = f"{tr_start}-{tr_end} hour acc fcst"
+        elif element == "MaxT":
+            tr_start = fcst_hour - 18
+            accum_str = f"{tr_start}-{tr_end} hour max fcst"
         else:
             raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
-        tr_end = fcst_hour
-        accum_str = f"{tr_start}-{tr_end} hour acc fcst"
-
         # Target percentiles
         # With this:
         target_perc_values = {5, 10, 25, 50, 75, 90, 95}
@@ -723,6 +729,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         for perc, values in grib_fields.items():
                             if element == "Precip24hr":
                                 record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
+                            elif element == "MaxT":
+                                record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
                             else:
                                 raise NotImplementedError(f"Unit conversions not set up for {element} in {model}.  Check HERBIE_UNIT_CONVERSIONS in archiver_config.py")
                         all_records.append(record)

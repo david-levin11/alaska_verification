@@ -14,6 +14,9 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     element_title = element.capitalize()  # "wind" → "Wind", etc.
 
     # Validate
+    if element.capitalize() not in config.AVAILABLE_FIELDS[model]:
+        print(f"{element} not found in AVAILABLE_FIELDS for {model} in archiver_config!  Please set up archiving for this element to continue")
+        raise NotImplementedError
     if model not in config.HERBIE_MODELS:
         print(f"❌ Model '{model}' not recognized. Valid options: {config.HERBIE_MODELS}")
         sys.exit(1)
@@ -86,8 +89,5 @@ if __name__ == "__main__":
         print(f"Archiving not yet set up for models other than nbm")
         raise NotImplementedError
     #print(args.element.title())
-    if args.element.capitalize() not in ["Wind", "Precip24hr"]:
-        print(f"Still working on setting up archiving for {args.element} for the {args.model}")
-        raise NotImplementedError
 
     run_monthly_archiving(start, end, args.model, args.element, args.local)
