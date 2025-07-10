@@ -9,7 +9,7 @@ class ModelArchiver(Archiver):
         super().__init__(config)
         self.start = start or config.OBS_START  # default fallback
         self.wxelement = wxelement or config.ELEMENT
-        if self.wxelement in ["Precip24hr"]:
+        if self.wxelement in ["precip24hr"]:
             self.station_df = self.ensure_metadata_precip()
         else:
             self.station_df = self.ensure_metadata()
@@ -75,28 +75,9 @@ class ModelArchiver(Archiver):
             config=self.config
         )
 
-## TODO ADD hrrrak, urma, rrfs
-## TODO ADD temp, precip vars
-## TODO Need to open qmd files using pygrib --> in utils.py
-# grbs = pygrib.open(os.path.join(inpath, fname))
-#     # grabbing the percentile values (1-99) for the 24hr precip accums
-#     site_list = []
-#     for i in range(1, 100):
-#         g = grbs.select(stepRange = stepRange, percentileValue = i)[0]
-# step range can be read from the basename of the file as below:
-# Extract forecast hour from filename (e.g., f060)
-        # base = os.path.basename(remote_url)
-        # fcst_match = re.search(r"f(\d{3})", base)
-        # if not fcst_match:
-        #     print("     ❌ Could not determine forecast hour from filename.")
-        #     return None
-        # fcst_hour = int(fcst_match.group(1))
-        # tr_start = fcst_hour - 24
-        # tr_end = fcst_hour
-        # accum_str = f"{tr_start}-{tr_end}
-if __name__ == "__main__":
-    archiver = ModelArchiver(config)
-    files = archiver.fetch_file_list("2024-01-01 00:00:00", "2024-01-02 00:00:00")
-    print(files)
-    df = archiver.process_files(files)
-    df.to_csv("test.csv")
+# if __name__ == "__main__":
+#     archiver = ModelArchiver(config)
+#     files = archiver.fetch_file_list("2024-01-01 00:00:00", "2024-01-02 00:00:00")
+#     print(files)
+#     df = archiver.process_files(files)
+#     df.to_csv("test.csv")

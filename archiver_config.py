@@ -3,7 +3,7 @@ import os
 
 USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
-ELEMENT = 'MaxT'
+ELEMENT = 'mint'
 
 ######################### Directories #################################
 
@@ -19,8 +19,6 @@ for directory in [OBS, MODEL_DIR, TMP]:
     os.makedirs(directory, exist_ok=True)
 ######################## File Names #################################
 
-#METADATA = f"alaska_{element}_obs_metadata.csv"
-
 WIND_OBS_FILE = f"alaska_{ELEMENT.lower()}_obs.csv"
 
 WIND_OBS_FILE_COMPRESSED = f"alaska_{ELEMENT.lower()}_obs.parquet"
@@ -30,7 +28,7 @@ WIND_OBS_FILE_COMPRESSED = f"alaska_{ELEMENT.lower()}_obs.parquet"
 API_KEY = "c6c8a66a96094960aabf1fed7d07ccf0" # link to get an API key can be found at https://docs.google.com/document/d/1YuMUYog4J7DpFoEszMmFir4Ehqk9Q0GHG_QhSdrgV9M/edit?usp=sharing
 
 TIMESERIES_URL = "https://api.synopticdata.com/v2/stations/timeseries"
-
+# This will need to be changed after the new Synoptic statistics API is released.
 STATISTICS_URL = "https://api.synopticdata.com/v2/stations/legacystats"
 
 METADATA_URL = "https://api.synopticdata.com/v2/stations/metadata"
@@ -40,9 +38,10 @@ STATE = "ak"
 HFMETAR = "0"
 
 OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
-            "Precip24hr": ["precip_intervals", "precip_accum"],
-            "MaxT": ["air_temp"]}
-# Need to set this up for Precip24hr and MaxT MinT
+            "precip24hr": ["precip_intervals", "precip_accum"],
+            "maxt": ["air_temp"],
+            "mint": ['air_temp']}
+# Need to set this up for precip24hr and maxt mint
 OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"]}
 
 OBS_RENAME_MAP = {
@@ -81,8 +80,9 @@ HERBIE_FORECASTS = {
             'Wind':[5,11,17,23,29,35,41,47,53,59,65,71,83,95,107,119,131,143,155,167]
         },
         'nbmqmd': {
-            'Precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
-            'MaxT': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174]
+            'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
+            'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174]
         },
 		'gfs':{
             'Wind': [24,48,72,96]
@@ -98,38 +98,42 @@ HERBIE_FORECASTS = {
           }  # same as rtma, no fcsts, just analysis
 		}
 
-AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['Precip24hr', "MaxT"], 'hrrr': ['Wind'], 'urma': ['Wind']}
+
+AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', "maxt", 'mint'], 'hrrr': ['Wind'], 'urma': ['Wind']}
 
 HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
-
-ELEMENT_DICT = {'Wind': {'nbm': ['si10', 'wdir10', 'i10fg']},
-                'Precip24hr': {'nbmqmd':[]}}
 
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
                                    'urma': []},
-                        'Precip24hr': {'nbmqmd': [':APCP:surface:']},
-                        'MaxT': {'nbmqmd': [':TMP:2 m above ground:']}}
+                        'precip24hr': {'nbmqmd': [':APCP:surface:']},
+                        'maxt': {'nbmqmd': [':TMP:2 m above ground:']},
+                        'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
 QMD_CYCLES = {
-    'Precip24hr': {
+    'precip24hr': {
     'nbmqmd': 24
     },
     'Precip6hr': {
         'nbmqmd': 6
     },
-    'MaxT': {
+    'maxt': {
+        'nbmqmd': 18
+    },
+    'mint': {
         'nbmqmd': 18
     }
 }
 
 HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m above ground']},
-                           'Precip24hr': {'nbmqmd': ['APCP:surface']},
-                           'MaxT': {'nbmqmd': [':TMP:2 m above ground:']}}
+                           'precip24hr': {'nbmqmd': ['APCP:surface']},
+                           'maxt': {'nbmqmd': [':TMP:2 m above ground:']},
+                           'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
 HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'hrrr': ['ens std dev']},
-                          'Precip24hr': {'nbmqmd': ['ens std dev']},
-                          'MaxT': {'nbmqmd': ['ens std dev']}}
+                          'precip24hr': {'nbmqmd': ['ens std dev']},
+                          'maxt': {'nbmqmd': ['ens std dev']},
+                          'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
 HERBIE_RENAME_MAP = {
     "Wind": {
@@ -149,14 +153,19 @@ HERBIE_RENAME_MAP = {
             "gust": "wind_gust_kt"
         }
     },
-    "Precip24hr": {
+    "precip24hr": {
         "nbmqmd": {
             "apcp": "precip_accum_24hr"
         }
     },
-    "MaxT": {
+    "maxt": {
         "nbmqmd": {
             "t2m": "max_temp"
+        }
+    },
+    "mint": {
+        "nbmqmd": {
+            "t2m": "min_temp"
         }
     }
 }
@@ -177,48 +186,52 @@ HERBIE_UNIT_CONVERSIONS = {
             "wind_gust_kt": 1.9484
         }
     },
-    "Precip24hr": {
-        "nbmqmd":  {"Precip24hr": 0.0393701
+    "precip24hr": {
+        "nbmqmd":  {"precip24hr": 0.0393701
         }
     },
-    "MaxT": {
-        "nbmqmd":  {"MaxT": 1.8
+    "maxt": {
+        "nbmqmd":  {"maxt": 1.8
         }
-    }
-}
-
-HERBIE_OPEN_INSTRUCTIONS = {
-    "Wind": {
-        "nbm": {
-            "variables": ["si10", "wdir10", "i10fg"],
-            "drop_vars": [],
-            "with_wind": False
-        },
-        "urma_ak": {
-            "variables": ["u10", "v10"],
-            "drop_vars": ["u10", "v10"],
-            "with_wind": True
+    },
+    "mint": {
+        "nbmqmd":  {"mint": 1.8
         }
     }
 }
 
-HERBIE_OUTPUT_COLUMNS = {
-    "Wind": {
-        "nbm": ["wind_speed_kt", "wind_dir_deg", "wind_gust_kt"]
-    },
-    "Temperature": {
-        "nbm": ["temp_f"]
-    },
-    "Precipitation": {
-        "nbm": ["precip_in"]
-    },
-    "Precip24hr": {
-        "nbmqmd": ["precip_24hr_percentile_5", "precip_24hr_percentile_10","precip_24hr_percentile_25","precip_24hr_percentile_50","precip_24hr_percentile_75","precip_24hr_percentile_90","precip_24hr_percentile_95"]
-    },
-    "MaxT": {
-        "nbmqmd": ["maxt_percentile_5", "maxt_percentile_10","maxt_percentile_25","maxt_percentile_50","maxt_percentile_75","maxt_percentile_90","maxt_percentile_95"]
-    }
-}
+# HERBIE_OPEN_INSTRUCTIONS = {
+#     "Wind": {
+#         "nbm": {
+#             "variables": ["si10", "wdir10", "i10fg"],
+#             "drop_vars": [],
+#             "with_wind": False
+#         },
+#         "urma_ak": {
+#             "variables": ["u10", "v10"],
+#             "drop_vars": ["u10", "v10"],
+#             "with_wind": True
+#         }
+#     }
+# }
+
+# HERBIE_OUTPUT_COLUMNS = {
+#     "Wind": {
+#         "nbm": ["wind_speed_kt", "wind_dir_deg", "wind_gust_kt"]
+#     },
+#     "Temperature": {
+#         "nbm": ["temp_f"]
+#     },
+#     "Precipitation": {
+#         "nbm": ["precip_in"]
+#     },
+#     "precip24hr": {
+#         "nbmqmd": ["precip_24hr_percentile_5", "precip_24hr_percentile_10","precip_24hr_percentile_25","precip_24hr_percentile_50","precip_24hr_percentile_75","precip_24hr_percentile_90","precip_24hr_percentile_95"]
+#     },
+#     "maxt": {
+#         "nbmqmd": ["maxt_percentile_5", "maxt_percentile_10","maxt_percentile_25","maxt_percentile_50","maxt_percentile_75","maxt_percentile_90","maxt_percentile_95"]
+#     }
+# }
 
 HERBIE_DOMAIN = "ak"
 

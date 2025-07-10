@@ -128,7 +128,10 @@ class ObsArchiver(Archiver):
         """Stub: observations don't use a file-based fetch"""
         return None
 
-    
+##TODO Will need to update to grab precipitation and max/min temps
+#  Can use statistics api for max/min temps: https://api.synopticlabs.org/v2/stations/legacystats?&token=c6c8a66a96094960aabf1fed7d07ccf0&vars=air_temp&start=202507081200&end=202507090600&type=maximum&units=temp%7Cf 
+#  Can use precip api for precip: https://api.synopticdata.com/v2/stations/precipitation?&token=c6c8a66a96094960aabf1fed7d07ccf0&bbox=-154.5,63.0,-141.0,66.0&pmode=totals&start=202507071200&end=202507081200&units=precip|in
+#
 # if __name__ == "__main__":
 #     obs_archiver = ObsArchiver(config)
 #     stations = obs_archiver.get_station_metadata()

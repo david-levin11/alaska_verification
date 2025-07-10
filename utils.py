@@ -416,12 +416,15 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             return None
         fcst_hour = int(fcst_match.group(1))
         tr_end = fcst_hour
-        if element == 'Precip24hr':
+        if element == 'precip24hr':
             tr_start = fcst_hour - 24
             accum_str = f"{tr_start}-{tr_end} hour acc fcst"
-        elif element == "MaxT":
+        elif element == "maxt":
             tr_start = fcst_hour - 18
             accum_str = f"{tr_start}-{tr_end} hour max fcst"
+        elif element == "mint":
+            tr_start = fcst_hour - 18
+            accum_str = f"{tr_start}-{tr_end} hour min fcst"
         else:
             raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
         # Target percentiles
@@ -430,7 +433,6 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         # Compile search patterns
         search_exprs = [re.escape(s) for s in search_strings]
         search_pattern = re.compile("|".join(search_exprs))
-
         for n, line in enumerate(lines, start=1):
             if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
                 continue
@@ -541,6 +543,18 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
             except Exception as e:
                 print(f"❌ Exception downloading URMA file: {e}")
                 return (remote_url, None)
+        elif model == 'nbmqmd':
+            downloaded_file = download_subset(
+                remote_url=remote_url,
+                local_filename=local_file,
+                search_strings=search_strings,
+                model=model,
+                element=element,
+                require_all_matches=True,
+                #required_phrases=config.HERBIE_REQUIRED_PHRASES[element][model],
+                #exclude_phrases=config.HERBIE_EXCLUDE_PHRASES[element][model],
+            )
+            return (remote_url, downloaded_file)
         else:          
             downloaded_file = download_subset(
                 remote_url=remote_url,
@@ -727,10 +741,12 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         }
 
                         for perc, values in grib_fields.items():
-                            if element == "Precip24hr":
+                            if element == "precip24hr":
                                 record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
-                            elif element == "MaxT":
-                                record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
+                            elif element == "maxt":
+                                record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2),
+                            elif element == "mint":
+                                record[f"mint_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
                             else:
                                 raise NotImplementedError(f"Unit conversions not set up for {element} in {model}.  Check HERBIE_UNIT_CONVERSIONS in archiver_config.py")
                         all_records.append(record)

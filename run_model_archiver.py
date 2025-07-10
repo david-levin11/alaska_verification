@@ -11,17 +11,15 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
 
     # Normalize to match config keys
     model = model_name.lower()
-    element_title = element.capitalize()  # "wind" → "Wind", etc.
-
+    if element.lower() == "wind":
+        element = element.capitalize()  # "wind" → "Wind", etc.
     # Validate
-    if element.capitalize() not in config.AVAILABLE_FIELDS[model]:
-        print(f"{element} not found in AVAILABLE_FIELDS for {model} in archiver_config!  Please set up archiving for this element to continue")
+    if element not in config.AVAILABLE_FIELDS[model]:
+        print(f"{element} not found in AVAILABLE_FIELDS for {model} in archiver_config! Must be one of: {list(config.AVAILABLE_FIELDS[model])}.") 
+        print('Check spelling and capitalization or set up archiver for your requested variable')
         raise NotImplementedError
     if model not in config.HERBIE_MODELS:
         print(f"❌ Model '{model}' not recognized. Valid options: {config.HERBIE_MODELS}")
-        sys.exit(1)
-    if element_title not in config.ELEMENT_DICT:
-        print(f"❌ Element '{element}' not recognized. Valid options: {list(config.ELEMENT_DICT.keys())}")
         sys.exit(1)
 
     if use_local:
