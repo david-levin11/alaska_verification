@@ -83,7 +83,7 @@ if __name__ == "__main__":
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
 
-    if args.model.lower() not in ['nbm', 'hrrr', 'urma', 'nbmqmd']:
+    if args.model.lower() not in ['nbm', 'hrrr', 'urma', 'nbmqmd', 'nbmqmd_exp']:
         print(f"Archiving not yet set up for models other than nbm")
         raise NotImplementedError
     #print(args.element.title())

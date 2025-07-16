@@ -35,27 +35,81 @@ class Archiver(ABC):
         except Exception as e:
             print(f"\u274C Failed to write partitioned parquet: {e}")
 
+    # def write_to_s3(self, df, s3_path, profile="default", region="us-east-2"):
+    #     try:
+    #         fs = fsspec.filesystem("s3", profile=profile, client_kwargs={"region_name": region})
+    #         with fs.open(s3_path, "wb") as f:
+    #             df.to_parquet(f, index=False)
+    #         print(f"✅ Successfully wrote to {s3_path}")
+    #     except Exception as e:
+    #         print(f"❌ Failed to write to S3: {e}")
+
     def write_to_s3(self, df, s3_path, profile="default", region="us-east-2"):
         try:
             fs = fsspec.filesystem("s3", profile=profile, client_kwargs={"region_name": region})
-            with fs.open(s3_path, "wb") as f:
-                df.to_parquet(f, index=False)
+            
+            if fs.exists(s3_path):
+                print(f"ℹ️ File exists at {s3_path}, appending to it...")
+                with fs.open(s3_path, "rb") as f:
+                    existing_df = pd.read_parquet(f)
+
+                # Concatenate and drop duplicates if needed (optional)
+                combined_df = pd.concat([existing_df, df], ignore_index=True).drop_duplicates()
+
+                with fs.open(s3_path, "wb") as f:
+                    combined_df.to_parquet(f, index=False)
+            else:
+                print(f"ℹ️ File does not exist at {s3_path}, creating new file...")
+                with fs.open(s3_path, "wb") as f:
+                    df.to_parquet(f, index=False)
+
             print(f"✅ Successfully wrote to {s3_path}")
+            
         except Exception as e:
             print(f"❌ Failed to write to S3: {e}")
 
-    def write_local_output(self, df, local_path):
+    # def write_local_output(self, df, local_path):
+    #     """
+    #     Save DataFrame locally to a Parquet file.
+    #     """
+    #     try:
+    #         local_path = Path(local_path)
+    #         local_path.parent.mkdir(parents=True, exist_ok=True)
+    #         df.to_parquet(local_path, index=False)
+    #         print(f"📁 Saved locally: {local_path}")
+    #     except Exception as e:
+    #         print(f"❌ Failed to write local file: {local_path} — {e}")
+
+    def write_local_output(self, df, local_path, dedup_columns=None):
         """
-        Save DataFrame locally to a Parquet file.
+        Save DataFrame locally to a Parquet file. If the file exists, append and de-duplicate.
+        
+        Parameters:
+            df (pd.DataFrame): DataFrame to write
+            local_path (str or Path): Path to local Parquet file
+            dedup_columns (list or None): Columns to use for de-duplication. If None, all columns used.
         """
         try:
             local_path = Path(local_path)
             local_path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(local_path, index=False)
+
+            if local_path.exists():
+                print(f"ℹ️ File exists at {local_path}, appending and de-duplicating...")
+                existing_df = pd.read_parquet(local_path)
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+                if dedup_columns:
+                    combined_df = combined_df.drop_duplicates(subset=dedup_columns)
+                else:
+                    combined_df = combined_df.drop_duplicates()
+            else:
+                print(f"ℹ️ Creating new file at {local_path}...")
+                combined_df = df
+
+            combined_df.to_parquet(local_path, index=False)
             print(f"📁 Saved locally: {local_path}")
+            
         except Exception as e:
             print(f"❌ Failed to write local file: {local_path} — {e}")
-
 
     def append_to_parquet_s3(self, df_new, s3_path, unique_keys):
         try:

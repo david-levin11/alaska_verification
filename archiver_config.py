@@ -3,7 +3,7 @@ import os
 
 USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
-ELEMENT = 'mint'
+ELEMENT = 'precip24hr'
 
 ######################### Directories #################################
 
@@ -63,12 +63,13 @@ INITIAL_WAIT = 1
 MAX_RETRIES = 5
 
 ################### Model Params ###################################
-MODEL = 'nbmqmd'
+MODEL = 'nbmqmd_exp'
 
-HERBIE_MODELS = ['hrrr','nbm','nbmqmd','urma','rtma','gfs']
+HERBIE_MODELS = ['hrrr','nbm','nbmqmd','nbmqmd_exp','urma','rtma','gfs']
 
 HERBIE_PRODUCTS = {'nbm':'ak',
             'nbmqmd': 'ak',
+            'nbmqmd_exp': 'ak',
 			'gfs':'pgrb2.0p25',
 			'hrrr':'sfc',
 			'rtma_ak':'ges',
@@ -83,6 +84,12 @@ HERBIE_FORECASTS = {
             'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
             'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
             'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174]
+        },
+        'nbmqmd_exp': {
+            'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
+            'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'Wind': [5,11,17,23,29,35,41,47,53,59,65,71,83,95,107,119,131,143,155,167]
         },
 		'gfs':{
             'Wind': [24,48,72,96]
@@ -99,16 +106,18 @@ HERBIE_FORECASTS = {
 		}
 
 
-AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', "maxt", 'mint'], 'hrrr': ['Wind'], 'urma': ['Wind']}
+AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', "maxt", 'mint'], 'nbmqmd_exp': ['precip24hr', "maxt", 'mint', 'Wind'], 'hrrr': ['Wind'], 'urma': ['Wind']}
 
-HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
+HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "nbmqmd_exp": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
+                                  'nbmqmd_exp': [':WIND:10 m above', ':GUST:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
                                    'urma': []},
-                        'precip24hr': {'nbmqmd': [':APCP:surface:']},
-                        'maxt': {'nbmqmd': [':TMP:2 m above ground:']},
-                        'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
+                        'precip24hr': {'nbmqmd': [':APCP:surface:'],'nbmqmd_exp': [':APCP:surface:']},
+                        'maxt': {'nbmqmd': [':TMP:2 m above ground:'], 'nbmqmd_exp': [':TMP:2 m above ground:']},
+                        'mint': {'nbmqmd': [':TMP:2 m above ground:'],'nbmqmd_exp': [':TMP:2 m above ground:']}
+                        }
 
 QMD_CYCLES = {
     'precip24hr': {
@@ -142,6 +151,10 @@ HERBIE_RENAME_MAP = {
             "si10": "wind_speed_kt",
             "i10fg": "wind_gust_kt"
         },
+        "nbmqmd_exp": {
+            "si10": "wind_speed_kt",
+            "i10fg": "wind_gust_kt"
+        },
         "urma": {
             "wdir10": "wind_dir_deg",
             "si10": "wind_speed_kt",
@@ -156,23 +169,37 @@ HERBIE_RENAME_MAP = {
     "precip24hr": {
         "nbmqmd": {
             "apcp": "precip_accum_24hr"
+        },
+        "nbmqmd_exp": {
+            "apcp": "precip_accum_24hr"
         }
     },
     "maxt": {
         "nbmqmd": {
+            "t2m": "max_temp"
+        },
+        "nbmqmd_exp": {
             "t2m": "max_temp"
         }
     },
     "mint": {
         "nbmqmd": {
             "t2m": "min_temp"
+        },
+        "nbmqmd_exp": {
+            "t2m": "min_temp"
         }
+    
     }
 }
 
 HERBIE_UNIT_CONVERSIONS = {
     "Wind": {
         "nbm": {
+            "wind_speed_kt": 1.94384,
+            "wind_gust_kt": 1.94384
+        },
+        "nbmqmd_exp": {
             "wind_speed_kt": 1.94384,
             "wind_gust_kt": 1.94384
         },
@@ -188,14 +215,20 @@ HERBIE_UNIT_CONVERSIONS = {
     },
     "precip24hr": {
         "nbmqmd":  {"precip24hr": 0.0393701
+        },
+        "nbmqmd_exp":  {"precip24hr": 0.0393701
         }
     },
     "maxt": {
         "nbmqmd":  {"maxt": 1.8
+        },
+        "nbmqmd_exp":  {"maxt": 1.8
         }
     },
     "mint": {
         "nbmqmd":  {"mint": 1.8
+        },
+        "nbmqmd_exp":  {"mint": 1.8
         }
     }
 }
@@ -266,11 +299,13 @@ S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/",
               "obs": "s3://alaska-verification/obs/",
                 'hrrr': "s3://alaska-verification/hrrr/",
                 'urma': "s3://alaska-verification/urma/",
-                "nbmqmd": "s3://alaska-verification/nbmqmd/"
+                "nbmqmd": "s3://alaska-verification/nbmqmd/",
+                "nbmqmd_exp": "s3://alaska-verification/nbmqmd_exp/"
               }
 
 MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
               'nbmqmd': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
+              'nbmqmd_exp': "https://noaa-nbm-para-pds.s3.amazonaws.com",
                'hrrr':'https://noaa-hrrr-bdp-pds.s3.amazonaws.com',
                  'urma': 'https://noaa-urma-pds.s3.amazonaws.com'
                  }

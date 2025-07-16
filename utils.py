@@ -261,6 +261,9 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
     elif model == 'nbmqmd':
         designator = "blend"
         suite = "qmd"
+    elif model == 'nbmqmd_exp':
+        designator = "blend"
+        suite = "qmd"
     else:
         print(f"url formatting for {base_url} for {model} not implemented. Check file name on AWS such as 'blend.t12z.f024.ak.grib2'.")
         raise NotImplementedError
@@ -287,6 +290,9 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
                     fxx = f"f{fh:03d}"
                     relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
                 elif model == 'nbmqmd':
+                    fxx = f"f{fh:03d}"
+                    relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
+                elif model == 'nbmqmd_exp':
                     fxx = f"f{fh:03d}"
                     relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
                 elif model == 'hrrr':
@@ -407,7 +413,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
     matched_ranges = {}
 
     # Special handling for NBM QPF percentiles
-    if model == "nbmqmd":
+    if model == "nbmqmd" or model == 'nbmqmd_exp':
         # Extract forecast hour from filename (e.g., f060)
         base = os.path.basename(remote_url)
         fcst_match = re.search(r"f(\d{3})", base)
@@ -508,6 +514,8 @@ def parse_date_and_time_from_url(remote_url, model):
         return url_parts[-4], url_parts[-3]
     elif model == 'nbmqmd': 
         return url_parts[-4], url_parts[-3]
+    elif model == 'nbmqmd_exp': 
+        return url_parts[-4], url_parts[-3]
     elif model == 'hrrr':
         return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     elif model == 'urma':
@@ -555,6 +563,18 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                 #exclude_phrases=config.HERBIE_EXCLUDE_PHRASES[element][model],
             )
             return (remote_url, downloaded_file)
+        elif model == 'nbmqmd_exp':
+            downloaded_file = download_subset(
+                remote_url=remote_url,
+                local_filename=local_file,
+                search_strings=search_strings,
+                model=model,
+                element=element,
+                require_all_matches=True,
+                #required_phrases=config.HERBIE_REQUIRED_PHRASES[element][model],
+                #exclude_phrases=config.HERBIE_EXCLUDE_PHRASES[element][model],
+            )
+            return (remote_url, downloaded_file)
         else:          
             downloaded_file = download_subset(
                 remote_url=remote_url,
@@ -584,7 +604,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     station_index_cache = {}  # move it here so it's scoped properly
     all_records = []
     # probabilistic data is processed differently due to issues with cfgrib
-    if model != 'nbmqmd':
+    if model not in  ['nbmqmd', 'nbmqmd_exp']:
         for i, local_file in enumerate(downloaded_files):
             print(f"Now processing {local_file}...")
             try:
@@ -707,7 +727,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
             print(f"Now processing {local_file}...")
 
             try:
-                if model == "nbmqmd":
+                if model == "nbmqmd" or model == "nbmqmd_exp":
                     # Parse once
                     grbs = list(pygrib.open(local_file))
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))

@@ -75,9 +75,9 @@ class ModelArchiver(Archiver):
             config=self.config
         )
 
-# if __name__ == "__main__":
-#     archiver = ModelArchiver(config)
-#     files = archiver.fetch_file_list("2024-01-01 00:00:00", "2024-01-02 00:00:00")
-#     print(files)
-#     df = archiver.process_files(files)
-#     df.to_csv("test.csv")
+if __name__ == "__main__":
+    archiver = ModelArchiver(config)
+    files = archiver.fetch_file_list("2025-07-13 00:00:00", "2025-07-14 00:00:00")
+    print(files)
+    df = archiver.process_files(files)
+    df.to_csv("test.csv")
