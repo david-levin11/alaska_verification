@@ -35,14 +35,7 @@ class Archiver(ABC):
         except Exception as e:
             print(f"\u274C Failed to write partitioned parquet: {e}")
 
-    # def write_to_s3(self, df, s3_path, profile="default", region="us-east-2"):
-    #     try:
-    #         fs = fsspec.filesystem("s3", profile=profile, client_kwargs={"region_name": region})
-    #         with fs.open(s3_path, "wb") as f:
-    #             df.to_parquet(f, index=False)
-    #         print(f"✅ Successfully wrote to {s3_path}")
-    #     except Exception as e:
-    #         print(f"❌ Failed to write to S3: {e}")
+
 
     def write_to_s3(self, df, s3_path, profile="default", region="us-east-2"):
         try:
@@ -68,17 +61,6 @@ class Archiver(ABC):
         except Exception as e:
             print(f"❌ Failed to write to S3: {e}")
 
-    # def write_local_output(self, df, local_path):
-    #     """
-    #     Save DataFrame locally to a Parquet file.
-    #     """
-    #     try:
-    #         local_path = Path(local_path)
-    #         local_path.parent.mkdir(parents=True, exist_ok=True)
-    #         df.to_parquet(local_path, index=False)
-    #         print(f"📁 Saved locally: {local_path}")
-    #     except Exception as e:
-    #         print(f"❌ Failed to write local file: {local_path} — {e}")
 
     def write_local_output(self, df, local_path, dedup_columns=None):
         """

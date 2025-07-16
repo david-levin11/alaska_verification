@@ -3,7 +3,7 @@ import os
 
 USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
-ELEMENT = 'precip24hr'
+ELEMENT = 'Gust'
 
 ######################### Directories #################################
 
@@ -89,7 +89,8 @@ HERBIE_FORECASTS = {
             'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
             'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
             'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
-            'Wind': [5,11,17,23,29,35,41,47,53,59,65,71,83,95,107,119,131,143,155,167]
+            'Wind': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
+            'Gust': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
         },
 		'gfs':{
             'Wind': [24,48,72,96]
@@ -106,17 +107,18 @@ HERBIE_FORECASTS = {
 		}
 
 
-AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', "maxt", 'mint'], 'nbmqmd_exp': ['precip24hr', "maxt", 'mint', 'Wind'], 'hrrr': ['Wind'], 'urma': ['Wind']}
+AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', "maxt", 'mint'], 'nbmqmd_exp': ['precip24hr', "maxt", 'mint', 'Wind', "Gust"], 'hrrr': ['Wind'], 'urma': ['Wind']}
 
 HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "nbmqmd_exp": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
-                                  'nbmqmd_exp': [':WIND:10 m above', ':GUST:10 m above'],
+                                  'nbmqmd_exp': [':WIND:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
                                    'urma': []},
                         'precip24hr': {'nbmqmd': [':APCP:surface:'],'nbmqmd_exp': [':APCP:surface:']},
                         'maxt': {'nbmqmd': [':TMP:2 m above ground:'], 'nbmqmd_exp': [':TMP:2 m above ground:']},
-                        'mint': {'nbmqmd': [':TMP:2 m above ground:'],'nbmqmd_exp': [':TMP:2 m above ground:']}
+                        'mint': {'nbmqmd': [':TMP:2 m above ground:'],'nbmqmd_exp': [':TMP:2 m above ground:']},
+                        'Gust': {'nbmqmd_exp': [':GUST:10 m above']}
                         }
 
 QMD_CYCLES = {
@@ -166,6 +168,11 @@ HERBIE_RENAME_MAP = {
             "gust": "wind_gust_kt"
         }
     },
+    "Gust": {
+        "nbmqmd_exp": {
+            "i10fg": "wind_gust_kt"
+        }
+    },
     "precip24hr": {
         "nbmqmd": {
             "apcp": "precip_accum_24hr"
@@ -210,6 +217,13 @@ HERBIE_UNIT_CONVERSIONS = {
         "hrrr": {
             "u_wind": 1.94384,
             "v_wind": 1.94384,
+            "wind_gust_kt": 1.9484
+        },
+        "nbmqmd_exp":  {"wind_speed_kt": 1.94384
+        }
+    },
+    "Gust": {
+        "nbmqmd_exp": {
             "wind_gust_kt": 1.9484
         }
     },

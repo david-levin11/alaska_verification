@@ -18,6 +18,10 @@ class ModelArchiver(Archiver):
         print(f"Creating metadata for {self.wxelement}")
         metadata = f'alaska_{self.wxelement}_obs_metadata.csv'
         meta_path = Path(self.config.OBS) / metadata
+        if self.wxelement == "Gust":
+            meta_element = self.config.OBS_VARS['Wind']
+        else:
+            meta_element = self.config.OBS_VARS[self.wxelement]
         if not meta_path.exists():
             print(f"Creating metadata from {self.config.METADATA_URL}")
             meta_json = create_wind_metadata(
@@ -25,7 +29,7 @@ class ModelArchiver(Archiver):
                 self.config.API_KEY,
                 self.config.STATE,
                 self.config.NETWORK,
-                self.config.OBS_VARS[self.wxelement],
+                meta_element,
                 self.start  # ✅ Use dynamic start date
             )
             meta_df = parse_metadata(meta_json)

@@ -21,6 +21,12 @@ def K_to_F(kelvin):
   fahrenheit = 1.8*(kelvin-273)+32.
   return fahrenheit
 
+def MS_to_KTS(ms):
+    return ms*1.94384
+
+def MS_to_MPH(ms):
+    return ms*2.23694
+
 def build_kdtree(lats, lons):
     """
     Build a cKDTree from 2D lat/lon arrays.
@@ -40,7 +46,17 @@ def query_kdtree(tree, shape, station_lat, station_lon):
     iy, ix = np.unravel_index(idx, shape)
     return iy, ix
 
+
+def normalize_lons_to_minus180_180(lons):
+    """Shift lons from [0, 360] to [-180, 180] only if needed."""
+    if np.nanmin(lons) >= 0:
+        #print("Found test case!")
+        lons = ((lons + 180) % 360) - 180
+    return lons
+
 def ll_to_index(loclat, loclon, datalats, datalons):
+    datalons = normalize_lons_to_minus180_180(datalons)
+
     abslat = np.abs(datalats - loclat)
     abslon = np.abs(datalons - loclon)
     c = np.maximum(abslon, abslat)
@@ -312,83 +328,6 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
     #print(f"File urls are: {file_urls}")
     return file_urls
 
-# def download_subset(remote_url, local_filename, search_strings, model, require_all_matches=True,
-#                      required_phrases=None, exclude_phrases=None):
-#     """
-#     Download a subset of a GRIB2 file based on .idx entries matching search_strings.
-
-#     Args:
-#         remote_url (str): Full URL to remote .grib2 file (not .idx)
-#         local_filename (str): Local path to save subset
-#         search_strings (list of str): Substring search matches (e.g., ":WIND:10 m above")
-#         require_all_matches (bool): If True, require all search_strings to match
-#         required_phrases (list of str, optional): Must appear in matching lines
-#         exclude_phrases (list of str, optional): If present in line, skip
-#     Returns:
-#         local_filename (str) if successful, None otherwise
-#     """
-#     print(f"  > Downloading subset for {os.path.basename(remote_url)}")
-#     print(f"🧪 Search strings: {search_strings}")
-
-#     #local_file = os.path.join(model, local_filename)
-#     os.makedirs(os.path.dirname(local_filename), exist_ok=True)
-
-#     idx_url = remote_url + ".idx"
-#     r = requests.get(idx_url)
-#     if not r.ok:
-#         print(f'     ❌ Could not get index file: {idx_url} ({r.status_code} {r.reason})')
-#         return None
-
-#     lines = r.text.strip().split('\n')
-#     exprs = {s: re.compile(re.escape(s)) for s in search_strings}
-
-#     matched_ranges = {}
-#     matched_vars = set()
-
-#     for n, line in enumerate(lines, start=1):
-#         if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
-#             continue
-
-#         #if required_phrases and not all(phrase in line for phrase in required_phrases):
-#         #    continue
-
-#         for search_str, expr in exprs.items():
-#             if expr.search(line):
-#                 matched_vars.add(search_str)
-#                 parts = line.split(':')
-#                 rangestart = int(parts[1])
-
-#                 # End byte: either next line's start byte, or EOF
-#                 if n < len(lines):
-#                     parts_next = lines[n].split(':')
-#                     rangeend = int(parts_next[1]) - 1
-#                 else:
-#                     rangeend = ''
-
-#                 matched_ranges[f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'] = line
-
-#     # Check matches
-#     if require_all_matches and len(matched_vars) != len(search_strings):
-#         print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
-#         return None
-
-#     if not matched_ranges:
-#         print(f'      ❌ No matches found for {search_strings}')
-#         return None
-
-#     # Now download the matching byte ranges
-#     with open(local_filename, 'wb') as f_out:
-#         for byteRange in matched_ranges.keys():
-#             headers = {'Range': f'bytes=' + byteRange}
-#             r = requests.get(remote_url, headers=headers)
-#             if r.status_code in (200, 206):
-#                 f_out.write(r.content)
-#             else:
-#                 print(f"      ❌ Failed to download byte range {byteRange}")
-#                 return None
-
-#     print(f'      ✅ Downloaded [{len(matched_ranges)}] fields from {os.path.basename(remote_url)} → {local_filename}')
-#     return local_filename if os.path.exists(local_filename) else None
 
 def download_subset(remote_url, local_filename, search_strings, model, element,
                     require_all_matches=True,
@@ -431,6 +370,12 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         elif element == "mint":
             tr_start = fcst_hour - 18
             accum_str = f"{tr_start}-{tr_end} hour min fcst"
+        elif element == "Wind":
+            tr_start = tr_end
+            accum_str = f"{tr_end} hour fcst"
+        elif element == "Gust":
+            tr_start = tr_end
+            accum_str = f"{tr_end} hour fcst"
         else:
             raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
         # Target percentiles
@@ -644,8 +589,10 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         decode_timedelta=True
                     )
                 lats = ds.latitude.values
-                lons = ds.longitude.values - 360  # wrap longitude
-                tree, grid_shape = build_kdtree(lats, lons)
+                lons = ds.longitude.values  # wrap longitude
+                #print(f"We are looking at other lons...")
+                #print(f"Lons are: {lons[150,150]}")
+                #tree, grid_shape = build_kdtree(lats, lons)
                 valid_time = pd.to_datetime(ds.valid_time.values)
                 if model == 'nbm':
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
@@ -670,7 +617,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                     if stid in station_index_cache:
                             iy, ix = station_index_cache[stid]
                     else:
-                        iy, ix = query_kdtree(tree, grid_shape, lat, lon)
+                        #iy, ix = query_kdtree(tree, grid_shape, lat, lon)
+                        iy, ix = ll_to_index(lat, lon, lats, lons)
                         station_index_cache[stid] = (iy, ix)
 
                     record = {
@@ -733,13 +681,15 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
                     valid_time = pd.to_datetime(grbs[1].validDate)
                     lats, lons = grbs[0].latlons()
-                    lons = lons - 360
-
-                    tree, grid_shape = build_kdtree(lats, lons)
+                    #lons = lons - 360
+                    #print(f"Model is nbmqmd")
+                    #print(f"Lons are: {lons[150,150]}")
+                    #tree, grid_shape = build_kdtree(lats, lons)
                     # Cache all GRIB values by percentile
                     grib_fields = {}
                     for g in grbs:
                         if hasattr(g, "percentileValue"):
+                            #print(g)
                             grib_fields[int(g.percentileValue)] = g.values
 
                     # Process all stations
@@ -750,9 +700,10 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         if stid in station_index_cache:
                             iy, ix = station_index_cache[stid]
                         else:
-                            iy, ix = query_kdtree(tree, grid_shape, lat, lon)
+                            #iy, ix = query_kdtree(tree, grid_shape, lat, lon)
+                            #station_index_cache[stid] = (iy, ix)
+                            iy, ix = ll_to_index(lat, lon, lats, lons)
                             station_index_cache[stid] = (iy, ix)
-
                         record = {
                             "station_id": stid,
                             "init_time": valid_time - pd.to_timedelta(forecast_hour, unit="h"),
@@ -767,6 +718,11 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2),
                             elif element == "mint":
                                 record[f"mint_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
+                            elif element == "Wind":
+                                record[f"wind_p{perc}"] = round(float(MS_to_KTS(values[iy,ix])),2)
+                            elif element == "Gust":
+                                record[f"gust_p{perc}"] = round(float(MS_to_KTS(values[iy,ix])),2)
+                                #
                             else:
                                 raise NotImplementedError(f"Unit conversions not set up for {element} in {model}.  Check HERBIE_UNIT_CONVERSIONS in archiver_config.py")
                         all_records.append(record)
