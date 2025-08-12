@@ -364,6 +364,9 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         if element == 'precip24hr':
             tr_start = fcst_hour - 24
             accum_str = f"{tr_start}-{tr_end} hour acc fcst"
+        elif element == 'precip6hr':
+            tr_start = fcst_hour - 6
+            accum_str = f"{tr_start}-{tr_end} hour acc fcst"
         elif element == "maxt":
             tr_start = fcst_hour - 18
             accum_str = f"{tr_start}-{tr_end} hour max fcst"
@@ -713,6 +716,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
 
                         for perc, values in grib_fields.items():
                             if element == "precip24hr":
+                                record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
+                            elif element == "precip6hr":
                                 record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
                             elif element == "maxt":
                                 record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2),

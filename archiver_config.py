@@ -3,7 +3,7 @@ import os
 
 USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
-ELEMENT = 'Gust'
+ELEMENT = 'precip24hr'
 
 ######################### Directories #################################
 
@@ -43,7 +43,8 @@ OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
             "maxt": ["air_temp"],
             "mint": ['air_temp']}
 # Need to set this up for precip24hr and maxt mint
-OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"]}
+OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"],
+                  "precip24hr": ['precip_24h']}
 
 OBS_RENAME_MAP = {
     "Wind": {
@@ -55,9 +56,9 @@ OBS_RENAME_MAP = {
 
 NETWORK = "1,107,90,179,200,286,3004"
 
-OBS_START = "202201010000"
+OBS_START = "202508010000"
 
-OBS_END = "202202010000"
+OBS_END = "202508060000"
 # Start with 1 second and back off
 INITIAL_WAIT = 1
 # Number of retry attempts
