@@ -39,6 +39,7 @@ HFMETAR = "0"
 
 OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
             "precip24hr": ["precip_intervals", "precip_accum"],
+            "precip6hr": ["precip_intervals", "precip_accum"],
             "maxt": ["air_temp"],
             "mint": ['air_temp']}
 # Need to set this up for precip24hr and maxt mint
@@ -82,11 +83,13 @@ HERBIE_FORECASTS = {
         },
         'nbmqmd': {
             'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
+            'precip6hr': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
             'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
             'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174]
         },
         'nbmqmd_exp': {
             'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
+            'precip6hr': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
             'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
             'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
             'Wind': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
@@ -107,7 +110,7 @@ HERBIE_FORECASTS = {
 		}
 
 
-AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', "maxt", 'mint'], 'nbmqmd_exp': ['precip24hr', "maxt", 'mint', 'Wind', "Gust"], 'hrrr': ['Wind'], 'urma': ['Wind']}
+AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint'], 'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', "Gust"], 'hrrr': ['Wind'], 'urma': ['Wind']}
 
 HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "nbmqmd_exp": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
@@ -116,6 +119,7 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
                                    'urma': []},
                         'precip24hr': {'nbmqmd': [':APCP:surface:'],'nbmqmd_exp': [':APCP:surface:']},
+                        'precip6hr': {'nbmqmd': [':APCP:surface:'],'nbmqmd_exp': [':APCP:surface:']},
                         'maxt': {'nbmqmd': [':TMP:2 m above ground:'], 'nbmqmd_exp': [':TMP:2 m above ground:']},
                         'mint': {'nbmqmd': [':TMP:2 m above ground:'],'nbmqmd_exp': [':TMP:2 m above ground:']},
                         'Gust': {'nbmqmd_exp': [':GUST:10 m above']}
@@ -123,16 +127,20 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
 
 QMD_CYCLES = {
     'precip24hr': {
-    'nbmqmd': 24
+    'nbmqmd': 24,
+    'nbmqmd_exp': 24
     },
-    'Precip6hr': {
-        'nbmqmd': 6
+    'precip6hr': {
+        'nbmqmd': 6,
+        'nbmqmd_exp': 6
     },
     'maxt': {
-        'nbmqmd': 18
+        'nbmqmd': 18,
+        'nbmqmd_exp': 18
     },
     'mint': {
-        'nbmqmd': 18
+        'nbmqmd': 18,
+        'nbmqmd_exp': 18
     }
 }
 
@@ -179,6 +187,14 @@ HERBIE_RENAME_MAP = {
         },
         "nbmqmd_exp": {
             "apcp": "precip_accum_24hr"
+        }
+    },
+    "precip6hr": {
+        "nbmqmd": {
+            "apcp": "precip_accum_6hr"
+        },
+        "nbmqmd_exp": {
+            "apcp": "precip_accum_6hr"
         }
     },
     "maxt": {
@@ -233,6 +249,12 @@ HERBIE_UNIT_CONVERSIONS = {
         "nbmqmd_exp":  {"precip24hr": 0.0393701
         }
     },
+    "precip6hr": {
+        "nbmqmd":  {"precip6hr": 0.0393701
+        },
+        "nbmqmd_exp":  {"precip6hr": 0.0393701
+        }
+    },
     "maxt": {
         "nbmqmd":  {"maxt": 1.8
         },
@@ -247,38 +269,6 @@ HERBIE_UNIT_CONVERSIONS = {
     }
 }
 
-# HERBIE_OPEN_INSTRUCTIONS = {
-#     "Wind": {
-#         "nbm": {
-#             "variables": ["si10", "wdir10", "i10fg"],
-#             "drop_vars": [],
-#             "with_wind": False
-#         },
-#         "urma_ak": {
-#             "variables": ["u10", "v10"],
-#             "drop_vars": ["u10", "v10"],
-#             "with_wind": True
-#         }
-#     }
-# }
-
-# HERBIE_OUTPUT_COLUMNS = {
-#     "Wind": {
-#         "nbm": ["wind_speed_kt", "wind_dir_deg", "wind_gust_kt"]
-#     },
-#     "Temperature": {
-#         "nbm": ["temp_f"]
-#     },
-#     "Precipitation": {
-#         "nbm": ["precip_in"]
-#     },
-#     "precip24hr": {
-#         "nbmqmd": ["precip_24hr_percentile_5", "precip_24hr_percentile_10","precip_24hr_percentile_25","precip_24hr_percentile_50","precip_24hr_percentile_75","precip_24hr_percentile_90","precip_24hr_percentile_95"]
-#     },
-#     "maxt": {
-#         "nbmqmd": ["maxt_percentile_5", "maxt_percentile_10","maxt_percentile_25","maxt_percentile_50","maxt_percentile_75","maxt_percentile_90","maxt_percentile_95"]
-#     }
-# }
 
 HERBIE_DOMAIN = "ak"
 

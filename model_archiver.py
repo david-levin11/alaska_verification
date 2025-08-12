@@ -9,7 +9,7 @@ class ModelArchiver(Archiver):
         super().__init__(config)
         self.start = start or config.OBS_START  # default fallback
         self.wxelement = wxelement or config.ELEMENT
-        if self.wxelement in ["precip24hr"]:
+        if self.wxelement in ["precip24hr", "precip6hr"]:
             self.station_df = self.ensure_metadata_precip()
         else:
             self.station_df = self.ensure_metadata()

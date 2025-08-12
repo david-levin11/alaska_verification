@@ -1,4 +1,5 @@
 import argparse
+import tempfile
 from model_archiver import ModelArchiver
 import archiver_config as config
 import pandas as pd
@@ -6,6 +7,10 @@ from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
+
+# setting temp file dir
+os.makedirs(config.TMP, exist_ok=True)
+tempfile.tempdir = config.TMP
 
 def run_monthly_archiving(start, end, model_name, element, use_local):
 
@@ -45,7 +50,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
             print("⚠️ No files found for this chunk.")
         else:
             df = archiver.process_files(file_urls)
-            #print(f'Dataframe is: {df[df['station_id']=='PAAQ'].head(10)}')
+            print(f'Dataframe is: {df[df['station_id']=='PAAQ'].head(10)}')
             #df.to_csv('test.csv')
             if df.empty:
                 print("⚠️ No data extracted for this chunk.")
