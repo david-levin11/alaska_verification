@@ -166,6 +166,263 @@ class ObsArchiver(Archiver):
                 })
         return pd.DataFrame(rows)
 
+    @staticmethod
+    def _to_utc_timestamp(val):
+        """Accept 'YYYYmmdd' or 'YYYYmmddHHMM' or datetime → pandas UTC Timestamp @ 00Z for YYYYmmdd."""
+        if isinstance(val, datetime):
+            return pd.Timestamp(val, tz="UTC").floor("D")
+        s = str(val)
+        if len(s) == 8:
+            return pd.to_datetime(s + "0000", format="%Y%m%d%H%M", utc=True).floor("D")
+        # assume YYYYmmddHHMM
+        return pd.to_datetime(s, format="%Y%m%d%H%M", utc=True).floor("D")
+
+    def fetch_tmax_12to06_timeseries(self, station_ids, start_date, end_date, *, units="english"):
+        """
+        Max temperature over 12Z→06Z-next-day windows for each station and day.
+
+        Parameters
+        ----------
+        station_ids : list[str]
+        start_date  : 'YYYYmmdd' or 'YYYYmmddHHMM' or datetime  (anchor-day start, UTC)
+        end_date    : 'YYYYmmdd' or 'YYYYmmddHHMM' or datetime  (anchor-day end, UTC)
+        units       : "english" (°F) or "metric" (°C)
+
+        Returns DataFrame with columns:
+        stid, lat, lon, elev, date (anchor day UTC),
+        window_start, window_end, tmax, temp_units, NWSZONE, NWSCWA
+        """
+        # --- build fetch window: first 12Z through last 06Z after end_date
+        start_day = self._to_utc_timestamp(start_date)
+        end_day   = self._to_utc_timestamp(end_date)
+        if end_day < start_day:
+            raise ValueError("end_date must be >= start_date")
+
+        fetch_start = start_day + pd.Timedelta(hours=12)     # first 12Z
+        fetch_end   = end_day + pd.Timedelta(days=1, hours=6)  # last 06Z after end_day
+
+        units_param = "english" if units.lower() == "english" else "metric"
+
+        parts = []
+        for chunk in self._chunk_station_ids(station_ids):
+            attempt, wait = 0, self.initial_wait
+            while attempt < self.max_retries:
+                try:
+                    params = {
+                        "token": self.api_token,
+                        "stid": ",".join(chunk),
+                        "start": fetch_start.strftime("%Y%m%d%H%M"),
+                        "end":   fetch_end.strftime("%Y%m%d%H%M"),
+                        "vars":  "air_temp",
+                        "obtimezone": "utc",
+                        "units": units_param,     # °F or °C
+                        "output": "json",
+                        "hfmetars": self.hfmetar,
+                    }
+                    r = requests.get(self.url, params=params, timeout=60)
+                    r.raise_for_status()
+                    js = r.json()
+
+                    # --- flatten minimal time series
+                    rows = []
+                    for st in js.get("STATION", []):
+                        stid = st.get("STID")
+                        obs = st.get("OBSERVATIONS", {}) or {}
+                        times = obs.get("date_time", []) or []
+                        # pick temperature key (e.g., 'air_temp_set_1')
+                        tkey = "air_temp_set_1"
+                        if tkey not in obs:
+                            # fallback to any air_temp* key
+                            cand = [k for k in obs if k.startswith("air_temp")]
+                            if cand:
+                                tkey = cand[0]
+                            else:
+                                continue
+                        temps = obs.get(tkey, []) or []
+
+                        zone_info = self.station_metadata.get(stid, {}) if hasattr(self, "station_metadata") else {}
+
+                        for i, ts in enumerate(times):
+                            rows.append({
+                                "stid": stid,
+                                "lat": st.get("LATITUDE"),
+                                "lon": st.get("LONGITUDE"),
+                                "elev": st.get("ELEVATION"),
+                                "valid_time": pd.to_datetime(ts, utc=True),
+                                "temp": pd.to_numeric(temps[i], errors="coerce") if i < len(temps) else pd.NA,
+                                "NWSZONE": zone_info.get("zone"),
+                                "NWSCWA": zone_info.get("cwa"),
+                            })
+                    if rows:
+                        parts.append(pd.DataFrame(rows))
+                    break
+                except Exception as e:
+                    print(f"Retry {attempt+1}/{self.max_retries} (stations {chunk[:3]}...): {e}")
+                    attempt += 1
+                    sleep(wait); wait *= 2
+
+        if not parts:
+            return pd.DataFrame(columns=[
+                "stid","lat","lon","elev","date","window_start","window_end",
+                "tmax","temp_units","NWSZONE","NWSCWA"
+            ])
+
+        df = pd.concat(parts, ignore_index=True)
+        df = df.sort_values(["stid","valid_time"]).reset_index(drop=True)
+
+        # --- keep only times inside the 12Z–24Z OR 00Z–06Z windows
+        hr = df["valid_time"].dt.hour
+        df = df[(hr >= 12) | (hr < 6)].copy()
+
+        # --- anchor each sample to its 12Z-start day: floor((t-12h) to day)
+        df["anchor_day"] = (df["valid_time"] - pd.Timedelta(hours=12)).dt.floor("D")
+        # keep only requested anchor-day range
+        df = df[(df["anchor_day"] >= start_day) & (df["anchor_day"] <= end_day)]
+
+        # --- compute Tmax per station & anchor_day
+        grp = (df.groupby(["stid","anchor_day"], as_index=False)
+                .agg(tmax=("temp", "max"),
+                    lat=("lat","first"),
+                    lon=("lon","first"),
+                    elev=("elev","first"),
+                    NWSZONE=("NWSZONE","first"),
+                    NWSCWA=("NWSCWA","first")))
+
+        # --- add window bounds + units
+        grp["window_start"] = grp["anchor_day"] + pd.Timedelta(hours=12)
+        grp["window_end"]   = grp["anchor_day"] + pd.Timedelta(days=1, hours=6)
+        grp.rename(columns={"anchor_day": "date"}, inplace=True)
+        grp["temp_units"] = "F" if units_param == "english" else "C"
+
+        cols = ["stid","lat","lon","elev","date","window_start","window_end",
+                "tmax","temp_units","NWSZONE","NWSCWA"]
+        return grp.loc[:, cols].sort_values(["stid","date"]).reset_index(drop=True)
+
+    def fetch_tmin_00to18_timeseries(self, station_ids, start_date, end_date, *, units="english"):
+        """
+        Min temperature over the 18-hour window: 00Z → 18Z (same day) for each station.
+
+        Parameters
+        ----------
+        station_ids : list[str]
+        start_date  : 'YYYYmmdd' or 'YYYYmmddHHMM' or datetime  (anchor-day start, UTC)
+        end_date    : 'YYYYmmdd' or 'YYYYmmddHHMM' or datetime  (anchor-day end, UTC)
+        units       : "english" (°F) or "metric" (°C)
+
+        Returns DataFrame with columns:
+        stid, lat, lon, elev, date (anchor day UTC),
+        window_start, window_end, tmin, temp_units, NWSZONE, NWSCWA
+        """
+        # Helper from your tmax function
+        def _to_utc_timestamp(val):
+            if isinstance(val, datetime):
+                return pd.Timestamp(val, tz="UTC").floor("D")
+            s = str(val)
+            if len(s) == 8:
+                return pd.to_datetime(s + "0000", format="%Y%m%d%H%M", utc=True).floor("D")
+            return pd.to_datetime(s, format="%Y%m%d%H%M", utc=True).floor("D")
+
+        # Anchor-day range
+        start_day = _to_utc_timestamp(start_date)
+        end_day   = _to_utc_timestamp(end_date)
+        if end_day < start_day:
+            raise ValueError("end_date must be >= start_date")
+
+        # Fetch just what we need: from first 00Z to last 18Z (same day window)
+        fetch_start = start_day + pd.Timedelta(hours=0)
+        fetch_end   = end_day   + pd.Timedelta(hours=18)
+
+        units_param = "english" if units.lower() == "english" else "metric"
+
+        parts = []
+        for chunk in self._chunk_station_ids(station_ids):
+            attempt, wait = 0, self.initial_wait
+            while attempt < self.max_retries:
+                try:
+                    params = {
+                        "token": self.api_token,
+                        "stid": ",".join(chunk),
+                        "start": fetch_start.strftime("%Y%m%d%H%M"),
+                        "end":   fetch_end.strftime("%Y%m%d%H%M"),
+                        "vars":  "air_temp",
+                        "obtimezone": "utc",
+                        "units": units_param,     # °F or °C
+                        "output": "json",
+                        "hfmetars": self.hfmetar,
+                    }
+                    r = requests.get(self.url, params=params, timeout=60)
+                    r.raise_for_status()
+                    js = r.json()
+
+                    rows = []
+                    for st in js.get("STATION", []):
+                        stid = st.get("STID")
+                        obs = st.get("OBSERVATIONS", {}) or {}
+                        times = obs.get("date_time", []) or []
+                        # temperature key (e.g., air_temp_set_1)
+                        tkey = "air_temp_set_1"
+                        if tkey not in obs:
+                            cand = [k for k in obs if k.startswith("air_temp")]
+                            if not cand:
+                                continue
+                            tkey = cand[0]
+                        vals = obs.get(tkey, []) or []
+
+                        zone_info = getattr(self, "station_metadata", {}).get(stid, {})
+                        for i, ts in enumerate(times):
+                            rows.append({
+                                "stid": stid,
+                                "lat":  st.get("LATITUDE"),
+                                "lon":  st.get("LONGITUDE"),
+                                "elev": st.get("ELEVATION"),
+                                "valid_time": pd.to_datetime(ts, utc=True),
+                                "temp": pd.to_numeric(vals[i], errors="coerce") if i < len(vals) else pd.NA,
+                                "NWSZONE": zone_info.get("zone"),
+                                "NWSCWA": zone_info.get("cwa"),
+                            })
+                    if rows:
+                        parts.append(pd.DataFrame(rows))
+                    break
+                except Exception as e:
+                    print(f"Retry {attempt+1}/{self.max_retries} (stations {chunk[:3]}...): {e}")
+                    attempt += 1
+                    sleep(wait); wait *= 2
+
+        if not parts:
+            return pd.DataFrame(columns=[
+                "stid","lat","lon","elev","date","window_start","window_end",
+                "tmin","temp_units","NWSZONE","NWSCWA"
+            ])
+
+        df = pd.concat(parts, ignore_index=True)
+        df = df.sort_values(["stid","valid_time"]).reset_index(drop=True)
+
+        # Keep only samples inside [00Z, 18Z) for each day
+        hr = df["valid_time"].dt.hour
+        df = df[(hr >= 0) & (hr < 18)].copy()
+
+        # Anchor day is simply the UTC calendar day (no offset needed)
+        df["anchor_day"] = df["valid_time"].dt.floor("D")
+        df = df[(df["anchor_day"] >= start_day) & (df["anchor_day"] <= end_day)]
+
+        # Tmin per station & anchor_day
+        grp = (df.groupby(["stid","anchor_day"], as_index=False)
+                .agg(tmin=("temp", "min"),
+                    lat=("lat","first"),
+                    lon=("lon","first"),
+                    elev=("elev","first"),
+                    NWSZONE=("NWSZONE","first"),
+                    NWSCWA=("NWSCWA","first")))
+
+        # Window bounds + units
+        grp["window_start"] = grp["anchor_day"] + pd.Timedelta(hours=0)
+        grp["window_end"]   = grp["anchor_day"] + pd.Timedelta(hours=18)
+        grp.rename(columns={"anchor_day": "date"}, inplace=True)
+        grp["temp_units"] = "F" if units_param == "english" else "C"
+
+        cols = ["stid","lat","lon","elev","date","window_start","window_end",
+                "tmin","temp_units","NWSZONE","NWSCWA"]
+        return grp.loc[:, cols].sort_values(["stid","date"]).reset_index(drop=True)
 
     def fetch_observations(self, station_ids, start_time, end_time):
         all_obs = []
@@ -265,5 +522,13 @@ if __name__ == "__main__":
         df_obs = obs_archiver.fetch_precip_rolling(stations, config.OBS_START, config.OBS_END, accum_hours=6, step_hours=6)
     elif config.ELEMENT == "Wind":
         df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
+    elif config.ELEMENT == "maxt":
+        df_obs = obs_archiver.fetch_tmax_12to06_timeseries(
+        stations,
+        config.OBS_START,   # UTC anchor-day start (YYYYmmdd is fine)
+        config.OBS_END
+        )
+    elif config.ELEMENT == "mint":
+        df_obs = obs_archiver.fetch_tmin_00to18_timeseries(stations, config.OBS_START, config.OBS_END)
     #df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
     print(df_obs[df_obs['stid']=='PAJN'].head(10))

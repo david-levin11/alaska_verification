@@ -3,7 +3,7 @@ import os
 
 USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
-ELEMENT = 'precip24hr'
+ELEMENT = 'mint'
 
 ######################### Directories #################################
 
@@ -44,7 +44,10 @@ OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
             "mint": ['air_temp']}
 # Need to set this up for precip24hr and maxt mint
 OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"],
-                  "precip24hr": ['precip_24h']}
+                  "precip24hr": ["precip_24h"],
+                  "precip6hr": ["precip_6h"],
+                  "maxt": ["max_t"],
+                  "mint": ["min_t"]}
 
 OBS_RENAME_MAP = {
     "Wind": {
