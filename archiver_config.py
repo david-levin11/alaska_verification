@@ -280,25 +280,58 @@ HERBIE_DOMAIN = "ak"
 ########################## NDFD Params #################################
 NDFD_DIR = 'ndfd'
 
-NDFD_DICT = {"Wind": {"wspd": ["YCRZ98", "YCRZ97"], "wdir": ["YBRZ98", "YBRZ97"]}, "Gust": {"wgust": ["YWRZ98"]}}
+NDFD_DICT = {"Wind": 
+                {"wspd": ["YCRZ98", "YCRZ97"], 
+                "wdir": ["YBRZ98", "YBRZ97"]
+                },
+            "Gust": 
+                {"wgust": ["YWRZ98"]
+                 },
+            "precip6hr": 
+                {"qpf": ["YIRZ98"]
+                 },
+            "maxt": 
+                {"maxt": ["YGRZ98", "YGRZ97"]
+                 },
+            "mint": 
+                {"mint": ["YHRZ98", "YHRZ97"]
+                 },
+            "snow6hr": 
+                {"snow": ["YSRZ98"]
+                 }
+            }
 
-NDFD_SPEED_STRING = "YCRZ98"
+# NDFD_SPEED_STRING = "YCRZ98"
 
-NDFD_DIR_STRING = "YBRZ98"
+# NDFD_DIR_STRING = "YBRZ98"
 
-NDFD_GUST_STRING = "YWRZ98"
+# NDFD_GUST_STRING = "YWRZ98"
 
-NDFD_SPEED_STRING_EXT = "YCRZ97"
+# NDFD_SPEED_STRING_EXT = "YCRZ97"
 
-NDFD_DIR_STRING_EXT = "YBRZ97"
+# NDFD_DIR_STRING_EXT = "YBRZ97"
 
-NDFD_FILE_STRINGS = {"Wind": ["wspd", "wdir"], "Gust": ["wgust"]}
+NDFD_FILE_STRINGS = {"Wind":["wspd", "wdir"],
+                    "Gust": ["wgust"],
+                    "precip6hr": ["qpf"],
+                    "maxt": ["maxt"],
+                    "mint": ["mint"],
+                    "snow6hr": ["snow"]
+                    }
 
-NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"], "Gust": ["i10fg"]}
+NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"],
+                        "Gust": ["i10fg"],
+                        "precip6hr": ["unknown"],
+                        "maxt": ["tmax"],
+                        "mint": ["tmin"],
+                        "snow6hr": ["unknown"]
+                    }
 
 ##################### AWS Params #################################
 
 NDFD_S3_URL = "s3://alaska-verification/ndfd/"
+
+NDFD_S3_BASE = "s3://noaa-ndfd-pds/wmo"
 
 NBM_S3_URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com/"
 

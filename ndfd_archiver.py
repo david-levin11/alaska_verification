@@ -10,7 +10,7 @@ class NDFDArchiver(Archiver):
         super().__init__(config)
         self.start = start or config.OBS_START  # fallback to config if not passed
         self.wxelement = wxelement or config.ELEMENT
-        if self.wxelement in ["precip24hr"]:
+        if self.wxelement in ["precip24hr", "precip6hr", "snow6hr"]:
             self.station_df = self.ensure_metadata_precip()
         else:
             self.station_df = self.ensure_metadata()
@@ -65,6 +65,18 @@ class NDFDArchiver(Archiver):
         if self.config.ELEMENT == "Wind":
             speed_key, dir_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT]
         elif self.config.ELEMENT == "Gust":
+            speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
+            dir_key = None
+        elif self.config.ELEMENT == "precip6hr":
+            speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
+            dir_key = None
+        elif self.config.ELEMENT == "maxt":
+            speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
+            dir_key = None
+        elif self.config.ELEMENT == "mint":
+            speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
+            dir_key = None
+        elif self.config.ELEMENT == "snow6hr":
             speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
             dir_key = None
         else:
