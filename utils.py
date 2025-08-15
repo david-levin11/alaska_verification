@@ -27,6 +27,12 @@ def MS_to_KTS(ms):
 def MS_to_MPH(ms):
     return ms*2.23694
 
+def MM_to_IN(mm):
+    return mm*0.0393701
+
+def M_to_IN(m):
+    return m*39.3701
+
 def build_kdtree(lats, lons):
     """
     Build a cKDTree from 2D lat/lon arrays.
@@ -123,7 +129,7 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     end = pd.to_datetime(end, format="%Y%m%d%H%M")
     date_range = pd.date_range(start=start, end=end, freq="D")
 
-    base_s3 = "s3://noaa-ndfd-pds/wmo"
+    base_s3 = config.NDFD_S3_BASE
     fs = fsspec.filesystem("s3", anon=True)
     if element_type == "Wind":
         filtered_files = {"wspd": [], "wdir": []}
@@ -131,6 +137,18 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     elif element_type == "Gust":
         filtered_files = {"wgust": []}
         components = ["wgust"]
+    elif element_type == "precip6hr":
+        filtered_files = {"qpf": []}
+        components = ["qpf"]
+    elif element_type == "maxt":
+        filtered_files = {"maxt": []}
+        components = ["maxt"]
+    elif element_type == "mint":
+        filtered_files = {"mint": []}
+        components = ["mint"]
+    elif element_type == "snow6hr":
+        filtered_files = {"snow": []}
+        components = ["snow"]
 
     for component in components:
         prefixes = element_dict[element_type][component]
@@ -160,7 +178,7 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
 
         with fsspec.open(speed_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_speed:
             ds_speed = xr.open_dataset(f_speed.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
-
+        #print(f"Our dataset is: {ds_speed}")
         ds_dir = None
         if dir_url:
             with fsspec.open(dir_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_dir:
@@ -197,13 +215,19 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                     "forecast_hour": step_hr,
                 }
                 if config.ELEMENT == "Wind":
-                    record["wind_speed_kt"] = round(float(spd * 1.94384), 2)
+                    record["wind_speed_kt"] = round(float(MS_to_KTS(spd)), 2)
                     if direc is not None:
                         record["wind_dir_deg"] = round(float(direc), 0)
-                elif config.ELEMENT == "Temperature":
-                    record["temp_f"] = round(float(spd), 1)
                 elif config.ELEMENT == "Gust":
-                    record["wind_gust_kt"] = round(float(spd * 1.94384), 2)
+                    record["wind_gust_kt"] = round(float(MS_to_KTS(spd)), 2)
+                elif config.ELEMENT == "precip6hr":
+                    record["precip6hr"] = round(float(MM_to_IN(spd)), 2)
+                elif config.ELEMENT == "maxt":
+                    record["maxt"] = round(float(K_to_F(spd)), 2)
+                elif config.ELEMENT == "mint":
+                    record["mint"] = round(float(K_to_F(spd)), 2)
+                elif config.ELEMENT == "snow6hr":
+                    record["snow6hr"] = round(float(M_to_IN(spd)), 1)
                 else:
                     record[spd_key] = float(spd)
 
@@ -471,6 +495,47 @@ def parse_date_and_time_from_url(remote_url, model):
     else:
         raise ValueError(f"Unsupported date/time header parsing for model: {model}")
 
+
+def add_interval_precip_from_total(
+        df,
+        *,
+        total_col="precip_accum",                  
+        out_col="precip_6h",        
+        hours=6,                    
+        group_cols=("station_id", "init_time"),
+        clip_negative_to_zero=True  
+    ):
+        """
+        Compute interval precipitation as the difference between the cumulative
+        total at t and the cumulative total exactly 'hours' earlier, per station/run.
+
+        Only rows that have an exact prior timestamp (t - hours) in the same group
+        will receive a value; others remain NaN.
+        """
+        if total_col not in df.columns:
+            raise KeyError(f"'{total_col}' not found in DataFrame columns")
+
+        def _per_group(g):
+            g = g.sort_values("valid_time").copy()
+            # exact match target for previous cumulative value
+            g["_target_time"] = g["valid_time"] - pd.Timedelta(hours=hours)
+            prev = g[["valid_time", total_col]].rename(
+                columns={"valid_time": "_target_time", total_col: "_prev_total"}
+            )
+            g = g.merge(prev, on="_target_time", how="left")
+            g[out_col] = round((g[total_col] - g["_prev_total"]),2)
+            # handle resets/noise
+            if clip_negative_to_zero:
+                g[out_col] = g[out_col].where(g[out_col] >= 0, 0.0)
+            g.drop(columns=["_target_time", "_prev_total"], inplace=True)
+            return g
+
+        return (
+            df.groupby(list(group_cols), group_keys=False, sort=False)
+            .apply(_per_group)
+            .reset_index(drop=True)
+        )
+
 def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
     rename_map = config.HERBIE_RENAME_MAP[element][model]
     conversion_map = config.HERBIE_UNIT_CONVERSIONS[element].get(model, {})
@@ -645,31 +710,40 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         all_records.append(record)
 
                     elif model == 'hrrr':
-                        u = v = None  # Default to None in case either component is missing
+                        if element == "Wind":
+                            u = v = None  # Default to None in case either component is missing
 
-                        for grib_var, renamed_var in rename_map.items():
-                            if grib_var not in ds:
-                                continue
-                            val = ds[grib_var].values[iy, ix]
-                            factor = conversion_map.get(renamed_var, 1.0)
-                            val = val * factor if pd.notnull(val) else None
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = ds[grib_var].values[iy, ix]
+                                factor = conversion_map.get(renamed_var, 1.0)
+                                val = val * factor if pd.notnull(val) else None
 
-                            if renamed_var == "u_wind":
-                                u = val
-                            elif renamed_var == "v_wind":
-                                v = val
-                            else:
-                                if val is not None:
-                                    record[renamed_var] = round(float(val), 2)
+                                if renamed_var == "u_wind":
+                                    u = val
+                                elif renamed_var == "v_wind":
+                                    v = val
+                                else:
+                                    if val is not None:
+                                        record[renamed_var] = round(float(val), 2)
 
-                        # If both u and v exist, compute speed and direction
-                        if u is not None and v is not None:
-                            speed = np.sqrt(u**2 + v**2)
-                            direction = (270 - np.degrees(np.arctan2(v, u))) % 360
-                            record["wind_dir_deg"] = round(float(direction), 0)
-                            record["wind_speed_kt"] = round(float(speed), 2)
+                            # If both u and v exist, compute speed and direction
+                            if u is not None and v is not None:
+                                speed = np.sqrt(u**2 + v**2)
+                                direction = (270 - np.degrees(np.arctan2(v, u))) % 360
+                                record["wind_dir_deg"] = round(float(direction), 0)
+                                record["wind_speed_kt"] = round(float(speed), 2)
 
-                        all_records.append(record)         
+                            all_records.append(record)  
+                        elif element == 'precip6hr':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = MM_to_IN(ds[grib_var].values[iy, ix])
+                                record[renamed_var] = round(float(val), 2)
+
+                            all_records.append(record)       
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
     # using pygrib to process nbmqmd files
@@ -740,7 +814,18 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
         Path(local_file).unlink(missing_ok=True)
 
     shutil.rmtree(temp_download_dir)
-    return pd.DataFrame.from_records(all_records)
+    df = pd.DataFrame.from_records(all_records)
+    # logic for creating accum intervals from total precip for models that output only tp
+    if model == "hrrr" and element == "precip6hr":
+        # Pick the cumulative column name produced by your rename_map
+        candidates = ["precip_accum", "total_precip", "precip_total", "tp_total", "APCP_total"]
+        total_col = next((c for c in candidates if c in df.columns), None)
+        if total_col is not None:
+            df = add_interval_precip_from_total(
+                df, total_col=total_col, out_col="precip_6h", hours=6,
+                group_cols=("station_id", "init_time")
+            )
+    return df
 
 
 ## TODO ADD hrrrak, urma, rrfs

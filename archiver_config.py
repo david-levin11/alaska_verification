@@ -3,7 +3,7 @@ import os
 
 USE_CLOUD_STORAGE = True # Set to true to append to S3 bucket database.  False saves site level .csv files locally
 ######################### Wx Elements ################################
-ELEMENT = 'mint'
+ELEMENT = 'precip6hr'
 
 ######################### Directories #################################
 
@@ -68,7 +68,7 @@ INITIAL_WAIT = 1
 MAX_RETRIES = 5
 
 ################### Model Params ###################################
-MODEL = 'nbmqmd_exp'
+MODEL = 'hrrr'
 
 HERBIE_MODELS = ['hrrr','nbm','nbmqmd','nbmqmd_exp','urma','rtma','gfs']
 
@@ -103,7 +103,8 @@ HERBIE_FORECASTS = {
             'Wind': [24,48,72,96]
         },
 		'hrrr':{
-            'Wind': [12,18,24,30,36,42,48]
+            'Wind': [12,18,24,30,36,42,48],
+            'precip6hr': [0,6,12,18,24,30,36,42,48]
         },
 		'rtma':{
             'Wind':[0]
@@ -114,7 +115,11 @@ HERBIE_FORECASTS = {
 		}
 
 
-AVAILABLE_FIELDS = {'nbm': ['Wind'], 'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint'], 'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', "Gust"], 'hrrr': ['Wind'], 'urma': ['Wind']}
+AVAILABLE_FIELDS = {'nbm': ['Wind'],
+                    'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint'],
+                    'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', "Gust"],
+                    'hrrr': ['Wind', 'precip6hr'],
+                    'urma': ['Wind']}
 
 HERBIE_CYCLES = {"nbm": "6h","nbmqmd": "12h", "nbmqmd_exp": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
@@ -122,10 +127,15 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
                                   'nbmqmd_exp': [':WIND:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
                                    'urma': []},
-                        'precip24hr': {'nbmqmd': [':APCP:surface:'],'nbmqmd_exp': [':APCP:surface:']},
-                        'precip6hr': {'nbmqmd': [':APCP:surface:'],'nbmqmd_exp': [':APCP:surface:']},
-                        'maxt': {'nbmqmd': [':TMP:2 m above ground:'], 'nbmqmd_exp': [':TMP:2 m above ground:']},
-                        'mint': {'nbmqmd': [':TMP:2 m above ground:'],'nbmqmd_exp': [':TMP:2 m above ground:']},
+                        'precip24hr': {'nbmqmd': [':APCP:surface:'],
+                                       'nbmqmd_exp': [':APCP:surface:']},
+                        'precip6hr': {'nbmqmd': [':APCP:surface:'],
+                                      'nbmqmd_exp': [':APCP:surface:'],
+                                      'hrrr': [':APCP:surface']},
+                        'maxt': {'nbmqmd': [':TMP:2 m above ground:'],
+                                 'nbmqmd_exp': [':TMP:2 m above ground:']},
+                        'mint': {'nbmqmd': [':TMP:2 m above ground:'],
+                                 'nbmqmd_exp': [':TMP:2 m above ground:']},
                         'Gust': {'nbmqmd_exp': [':GUST:10 m above']}
                         }
 
@@ -150,11 +160,13 @@ QMD_CYCLES = {
 
 HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m above ground']},
                            'precip24hr': {'nbmqmd': ['APCP:surface']},
+                           'precip6hr': {'nbmqmd': ['APCP:surface'], 'hrrr': ['APCP:surface']},
                            'maxt': {'nbmqmd': [':TMP:2 m above ground:']},
                            'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
 HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'hrrr': ['ens std dev']},
                           'precip24hr': {'nbmqmd': ['ens std dev']},
+                          'precip6hr': {'nbmqmd': ['ens std dev'], 'hrrr': ['ens std dev']},
                           'maxt': {'nbmqmd': ['ens std dev']},
                           'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
@@ -199,6 +211,9 @@ HERBIE_RENAME_MAP = {
         },
         "nbmqmd_exp": {
             "apcp": "precip_accum_6hr"
+        },
+        "hrrr": {
+            "tp": "precip_accum"
         }
     },
     "maxt": {
@@ -257,6 +272,8 @@ HERBIE_UNIT_CONVERSIONS = {
         "nbmqmd":  {"precip6hr": 0.0393701
         },
         "nbmqmd_exp":  {"precip6hr": 0.0393701
+        },
+        "hrrr":  {"precip6hr": 0.0393701
         }
     },
     "maxt": {

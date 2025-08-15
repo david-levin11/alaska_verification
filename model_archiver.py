@@ -81,7 +81,8 @@ class ModelArchiver(Archiver):
 
 if __name__ == "__main__":
     archiver = ModelArchiver(config)
-    files = archiver.fetch_file_list("2025-07-13 00:00:00", "2025-07-14 00:00:00")
+    files = archiver.fetch_file_list("2025-08-11 00:00:00", "2025-08-12 00:00:00")
     print(files)
     df = archiver.process_files(files)
+    print(f'Dataframe is: {df[df['station_id']=='PAJN'].head(10)}')
     df.to_csv("test.csv")
