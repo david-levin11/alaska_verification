@@ -276,6 +276,44 @@ def generate_chunked_date_range(model, chunk_start, chunk_end, config):
     cycle = config.HERBIE_CYCLES[model]
     return pd.date_range(start=chunk_start, end=chunk_end, freq=cycle)
 
+def parse_forecast_hour(path: str) -> int:
+    base = os.path.basename(path)
+
+    # Try the most specific patterns first, then fall back:
+    patterns = [
+        r'\.f(\d{1,3})\.',            # ... .f060. ...
+        r'wrfsfcf(\d{1,3})(?=\D|$)',  # ... wrfsfcf18[. or end]
+        r'f(\d{1,3})(?=\D|$)',        # ... f18[. or end], generic fallback
+    ]
+    for pat in patterns:
+        m = re.search(pat, base)
+        if m:
+            return int(m.group(1))
+
+    raise ValueError(f"Could not extract forecast hour from filename: {base}")
+
+def labels_for_24h_accum(fcst_hour: int):
+    """
+    Return possible index labels for a 24-h accumulation ending at fcst_hour.
+    - For non-multiples of 24: "{fcst_hour-24}-{fcst_hour} hour acc fcst"
+      e.g., 30 -> "6-30 hour acc fcst"
+    - For multiples of 24: also include the "day" phrasing
+      e.g., 24 -> "0-1 day acc fcst"; 48 -> "1-2 day acc fcst"
+    """
+    if fcst_hour == 0:
+        return []  # no 24-h accumulation at t=0
+
+    start = max(0, fcst_hour - 24)
+    alts = [f"{start}-{fcst_hour} hour acc fcst"]
+
+    if fcst_hour % 24 == 0:
+        d_end = fcst_hour // 24
+        d_start = d_end - 1
+        alts.insert(0, f"{d_start}-{d_end} day acc fcst")
+
+    return alts
+
+
 def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model="nbm", domain="ak"):
     """
     Generate available NBM HTTPS URLs by checking if the index file (.idx) exists.
@@ -385,9 +423,13 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             return None
         fcst_hour = int(fcst_match.group(1))
         tr_end = fcst_hour
-        if element == 'precip24hr':
-            tr_start = fcst_hour - 24
-            accum_str = f"{tr_start}-{tr_end} hour acc fcst"
+        if element == "precip24hr":
+            accum_alts = labels_for_24h_accum(fcst_hour)
+            if not accum_alts:
+                # no 24-h accumulation at t=0
+                print("     ℹ️ No 24-h accumulation at forecast hour 0")
+                return None
+            accum_str = accum_alts[0]
         elif element == 'precip6hr':
             tr_start = fcst_hour - 6
             accum_str = f"{tr_start}-{tr_end} hour acc fcst"
@@ -436,7 +478,69 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
             matched_ranges[byte_range] = line
 
-    else:
+    if model in ["hrrr", "urma"] and element in ["precip6hr", "precip24hr", "snow6hr"]:
+        base = os.path.basename(remote_url)
+        try:
+            fcst_hour = parse_forecast_hour(base)
+        except ValueError:
+            print("     ❌ Could not determine forecast hour from filename.")
+            return None
+        tr_end = fcst_hour
+        if element == 'precip24hr':
+            tr_start = fcst_hour - 24
+            if tr_end == 24:
+                accum_str = f"0-1 day acc fcst"
+            elif tr_end == 48:
+                accum_str = f"0-2 day acc fcst"
+            elif tr_end == 0:
+                accum_str = f"0-0 day acc fcst"
+            else:
+                accum_str = f"0-{tr_end} hour acc fcst"
+        elif element == 'precip6hr':
+            tr_start = fcst_hour - 6
+            if tr_end == 24:
+                accum_str = f"0-1 day acc fcst"
+            elif tr_end == 48:
+                accum_str = f"0-2 day acc fcst"
+            elif tr_end == 0:
+                accum_str = f"0-0 day acc fcst"
+            else:
+                accum_str = f"0-{tr_end} hour acc fcst"
+        elif element == 'snow6hr':
+            tr_start = fcst_hour - 6
+            if tr_end == 24:
+                accum_str = f"0-1 day acc fcst"
+            elif tr_end == 48:
+                accum_str = f"0-2 day acc fcst"
+            elif tr_end == 0:
+                accum_str = f"0-0 day acc fcst"
+            else:
+                accum_str = f"0-{tr_end} hour acc fcst"
+        else:
+            raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
+        # Compile search patterns
+        search_exprs = [re.escape(s) for s in search_strings]
+        search_pattern = re.compile("|".join(search_exprs))
+        for n, line in enumerate(lines, start=1):
+            if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
+                continue
+            if not search_pattern.search(line):
+                continue
+            if accum_str not in line:
+                continue
+            parts = line.split(':')
+            rangestart = int(parts[1])
+
+            if n < len(lines):
+                parts_next = lines[n].split(':')
+                rangeend = int(parts_next[1]) - 1
+            else:
+                rangeend = ''
+
+            byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
+            matched_ranges[byte_range] = line
+
+    if model in ["hrrr", "urma"] and element not in ["precip6hr", "precip24hr", "snow6hr"]:
         # Generic logic for other models: just match search strings
         exprs = {s: re.compile(re.escape(s)) for s in search_strings}
         matched_vars = set()
@@ -743,6 +847,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 val = MM_to_IN(ds[grib_var].values[iy, ix])
                                 record[renamed_var] = round(float(val), 2)
 
+                            all_records.append(record)   
+                        elif element == 'snow6hr':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = M_to_IN(ds[grib_var].values[iy, ix])
+                                record[renamed_var] = round(float(val), 1)
+
                             all_records.append(record)       
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
@@ -823,6 +935,15 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
         if total_col is not None:
             df = add_interval_precip_from_total(
                 df, total_col=total_col, out_col="precip_6h", hours=6,
+                group_cols=("station_id", "init_time")
+            )
+    if model == "hrrr" and element == "snow6hr":
+        # Pick the cumulative column name produced by your rename_map
+        candidates = ["snow_accum", "total_snow", "snow_total", "tp_total", "ASNOW_total"]
+        total_col = next((c for c in candidates if c in df.columns), None)
+        if total_col is not None:
+            df = add_interval_precip_from_total(
+                df, total_col=total_col, out_col="snow_6h", hours=6,
                 group_cols=("station_id", "init_time")
             )
     return df
