@@ -27,6 +27,12 @@ def MS_to_KTS(ms):
 def MS_to_MPH(ms):
     return ms*2.23694
 
+def MM_to_IN(mm):
+    return mm*0.0393701
+
+def M_to_IN(m):
+    return m*39.3701
+
 def build_kdtree(lats, lons):
     """
     Build a cKDTree from 2D lat/lon arrays.
@@ -123,7 +129,7 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     end = pd.to_datetime(end, format="%Y%m%d%H%M")
     date_range = pd.date_range(start=start, end=end, freq="D")
 
-    base_s3 = "s3://noaa-ndfd-pds/wmo"
+    base_s3 = config.NDFD_S3_BASE
     fs = fsspec.filesystem("s3", anon=True)
     if element_type == "Wind":
         filtered_files = {"wspd": [], "wdir": []}
@@ -131,6 +137,18 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     elif element_type == "Gust":
         filtered_files = {"wgust": []}
         components = ["wgust"]
+    elif element_type == "precip6hr":
+        filtered_files = {"qpf": []}
+        components = ["qpf"]
+    elif element_type == "maxt":
+        filtered_files = {"maxt": []}
+        components = ["maxt"]
+    elif element_type == "mint":
+        filtered_files = {"mint": []}
+        components = ["mint"]
+    elif element_type == "snow6hr":
+        filtered_files = {"snow": []}
+        components = ["snow"]
 
     for component in components:
         prefixes = element_dict[element_type][component]
@@ -160,7 +178,7 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
 
         with fsspec.open(speed_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_speed:
             ds_speed = xr.open_dataset(f_speed.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
-
+        #print(f"Our dataset is: {ds_speed}")
         ds_dir = None
         if dir_url:
             with fsspec.open(dir_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_dir:
@@ -197,13 +215,19 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                     "forecast_hour": step_hr,
                 }
                 if config.ELEMENT == "Wind":
-                    record["wind_speed_kt"] = round(float(spd * 1.94384), 2)
+                    record["wind_speed_kt"] = round(float(MS_to_KTS(spd)), 2)
                     if direc is not None:
                         record["wind_dir_deg"] = round(float(direc), 0)
-                elif config.ELEMENT == "Temperature":
-                    record["temp_f"] = round(float(spd), 1)
                 elif config.ELEMENT == "Gust":
-                    record["wind_gust_kt"] = round(float(spd * 1.94384), 2)
+                    record["wind_gust_kt"] = round(float(MS_to_KTS(spd)), 2)
+                elif config.ELEMENT == "precip6hr":
+                    record["precip6hr"] = round(float(MM_to_IN(spd)), 2)
+                elif config.ELEMENT == "maxt":
+                    record["maxt"] = round(float(K_to_F(spd)), 2)
+                elif config.ELEMENT == "mint":
+                    record["mint"] = round(float(K_to_F(spd)), 2)
+                elif config.ELEMENT == "snow6hr":
+                    record["snow6hr"] = round(float(M_to_IN(spd)), 1)
                 else:
                     record[spd_key] = float(spd)
 
@@ -251,6 +275,44 @@ def generate_model_date_range(model, config):
 def generate_chunked_date_range(model, chunk_start, chunk_end, config):
     cycle = config.HERBIE_CYCLES[model]
     return pd.date_range(start=chunk_start, end=chunk_end, freq=cycle)
+
+def parse_forecast_hour(path: str) -> int:
+    base = os.path.basename(path)
+
+    # Try the most specific patterns first, then fall back:
+    patterns = [
+        r'\.f(\d{1,3})\.',            # ... .f060. ...
+        r'wrfsfcf(\d{1,3})(?=\D|$)',  # ... wrfsfcf18[. or end]
+        r'f(\d{1,3})(?=\D|$)',        # ... f18[. or end], generic fallback
+    ]
+    for pat in patterns:
+        m = re.search(pat, base)
+        if m:
+            return int(m.group(1))
+
+    raise ValueError(f"Could not extract forecast hour from filename: {base}")
+
+def labels_for_24h_accum(fcst_hour: int):
+    """
+    Return possible index labels for a 24-h accumulation ending at fcst_hour.
+    - For non-multiples of 24: "{fcst_hour-24}-{fcst_hour} hour acc fcst"
+      e.g., 30 -> "6-30 hour acc fcst"
+    - For multiples of 24: also include the "day" phrasing
+      e.g., 24 -> "0-1 day acc fcst"; 48 -> "1-2 day acc fcst"
+    """
+    if fcst_hour == 0:
+        return []  # no 24-h accumulation at t=0
+
+    start = max(0, fcst_hour - 24)
+    alts = [f"{start}-{fcst_hour} hour acc fcst"]
+
+    if fcst_hour % 24 == 0:
+        d_end = fcst_hour // 24
+        d_start = d_end - 1
+        alts.insert(0, f"{d_start}-{d_end} day acc fcst")
+
+    return alts
+
 
 def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model="nbm", domain="ak"):
     """
@@ -361,8 +423,15 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             return None
         fcst_hour = int(fcst_match.group(1))
         tr_end = fcst_hour
-        if element == 'precip24hr':
-            tr_start = fcst_hour - 24
+        if element == "precip24hr":
+            accum_alts = labels_for_24h_accum(fcst_hour)
+            if not accum_alts:
+                # no 24-h accumulation at t=0
+                print("     ℹ️ No 24-h accumulation at forecast hour 0")
+                return None
+            accum_str = accum_alts[0]
+        elif element == 'precip6hr':
+            tr_start = fcst_hour - 6
             accum_str = f"{tr_start}-{tr_end} hour acc fcst"
         elif element == "maxt":
             tr_start = fcst_hour - 18
@@ -409,7 +478,69 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
             matched_ranges[byte_range] = line
 
-    else:
+    if model in ["hrrr", "urma"] and element in ["precip6hr", "precip24hr", "snow6hr"]:
+        base = os.path.basename(remote_url)
+        try:
+            fcst_hour = parse_forecast_hour(base)
+        except ValueError:
+            print("     ❌ Could not determine forecast hour from filename.")
+            return None
+        tr_end = fcst_hour
+        if element == 'precip24hr':
+            tr_start = fcst_hour - 24
+            if tr_end == 24:
+                accum_str = f"0-1 day acc fcst"
+            elif tr_end == 48:
+                accum_str = f"0-2 day acc fcst"
+            elif tr_end == 0:
+                accum_str = f"0-0 day acc fcst"
+            else:
+                accum_str = f"0-{tr_end} hour acc fcst"
+        elif element == 'precip6hr':
+            tr_start = fcst_hour - 6
+            if tr_end == 24:
+                accum_str = f"0-1 day acc fcst"
+            elif tr_end == 48:
+                accum_str = f"0-2 day acc fcst"
+            elif tr_end == 0:
+                accum_str = f"0-0 day acc fcst"
+            else:
+                accum_str = f"0-{tr_end} hour acc fcst"
+        elif element == 'snow6hr':
+            tr_start = fcst_hour - 6
+            if tr_end == 24:
+                accum_str = f"0-1 day acc fcst"
+            elif tr_end == 48:
+                accum_str = f"0-2 day acc fcst"
+            elif tr_end == 0:
+                accum_str = f"0-0 day acc fcst"
+            else:
+                accum_str = f"0-{tr_end} hour acc fcst"
+        else:
+            raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
+        # Compile search patterns
+        search_exprs = [re.escape(s) for s in search_strings]
+        search_pattern = re.compile("|".join(search_exprs))
+        for n, line in enumerate(lines, start=1):
+            if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
+                continue
+            if not search_pattern.search(line):
+                continue
+            if accum_str not in line:
+                continue
+            parts = line.split(':')
+            rangestart = int(parts[1])
+
+            if n < len(lines):
+                parts_next = lines[n].split(':')
+                rangeend = int(parts_next[1]) - 1
+            else:
+                rangeend = ''
+
+            byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
+            matched_ranges[byte_range] = line
+
+    if model in ["hrrr", "urma"] and element not in ["precip6hr", "precip24hr", "snow6hr"]:
         # Generic logic for other models: just match search strings
         exprs = {s: re.compile(re.escape(s)) for s in search_strings}
         matched_vars = set()
@@ -467,6 +598,47 @@ def parse_date_and_time_from_url(remote_url, model):
         return url_parts[-2].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     else:
         raise ValueError(f"Unsupported date/time header parsing for model: {model}")
+
+
+def add_interval_precip_from_total(
+        df,
+        *,
+        total_col="precip_accum",                  
+        out_col="precip_6h",        
+        hours=6,                    
+        group_cols=("station_id", "init_time"),
+        clip_negative_to_zero=True  
+    ):
+        """
+        Compute interval precipitation as the difference between the cumulative
+        total at t and the cumulative total exactly 'hours' earlier, per station/run.
+
+        Only rows that have an exact prior timestamp (t - hours) in the same group
+        will receive a value; others remain NaN.
+        """
+        if total_col not in df.columns:
+            raise KeyError(f"'{total_col}' not found in DataFrame columns")
+
+        def _per_group(g):
+            g = g.sort_values("valid_time").copy()
+            # exact match target for previous cumulative value
+            g["_target_time"] = g["valid_time"] - pd.Timedelta(hours=hours)
+            prev = g[["valid_time", total_col]].rename(
+                columns={"valid_time": "_target_time", total_col: "_prev_total"}
+            )
+            g = g.merge(prev, on="_target_time", how="left")
+            g[out_col] = round((g[total_col] - g["_prev_total"]),2)
+            # handle resets/noise
+            if clip_negative_to_zero:
+                g[out_col] = g[out_col].where(g[out_col] >= 0, 0.0)
+            g.drop(columns=["_target_time", "_prev_total"], inplace=True)
+            return g
+
+        return (
+            df.groupby(list(group_cols), group_keys=False, sort=False)
+            .apply(_per_group)
+            .reset_index(drop=True)
+        )
 
 def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
     rename_map = config.HERBIE_RENAME_MAP[element][model]
@@ -642,31 +814,48 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         all_records.append(record)
 
                     elif model == 'hrrr':
-                        u = v = None  # Default to None in case either component is missing
+                        if element == "Wind":
+                            u = v = None  # Default to None in case either component is missing
 
-                        for grib_var, renamed_var in rename_map.items():
-                            if grib_var not in ds:
-                                continue
-                            val = ds[grib_var].values[iy, ix]
-                            factor = conversion_map.get(renamed_var, 1.0)
-                            val = val * factor if pd.notnull(val) else None
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = ds[grib_var].values[iy, ix]
+                                factor = conversion_map.get(renamed_var, 1.0)
+                                val = val * factor if pd.notnull(val) else None
 
-                            if renamed_var == "u_wind":
-                                u = val
-                            elif renamed_var == "v_wind":
-                                v = val
-                            else:
-                                if val is not None:
-                                    record[renamed_var] = round(float(val), 2)
+                                if renamed_var == "u_wind":
+                                    u = val
+                                elif renamed_var == "v_wind":
+                                    v = val
+                                else:
+                                    if val is not None:
+                                        record[renamed_var] = round(float(val), 2)
 
-                        # If both u and v exist, compute speed and direction
-                        if u is not None and v is not None:
-                            speed = np.sqrt(u**2 + v**2)
-                            direction = (270 - np.degrees(np.arctan2(v, u))) % 360
-                            record["wind_dir_deg"] = round(float(direction), 0)
-                            record["wind_speed_kt"] = round(float(speed), 2)
+                            # If both u and v exist, compute speed and direction
+                            if u is not None and v is not None:
+                                speed = np.sqrt(u**2 + v**2)
+                                direction = (270 - np.degrees(np.arctan2(v, u))) % 360
+                                record["wind_dir_deg"] = round(float(direction), 0)
+                                record["wind_speed_kt"] = round(float(speed), 2)
 
-                        all_records.append(record)         
+                            all_records.append(record)  
+                        elif element == 'precip6hr':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = MM_to_IN(ds[grib_var].values[iy, ix])
+                                record[renamed_var] = round(float(val), 2)
+
+                            all_records.append(record)   
+                        elif element == 'snow6hr':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = M_to_IN(ds[grib_var].values[iy, ix])
+                                record[renamed_var] = round(float(val), 1)
+
+                            all_records.append(record)       
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
     # using pygrib to process nbmqmd files
@@ -714,6 +903,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         for perc, values in grib_fields.items():
                             if element == "precip24hr":
                                 record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
+                            elif element == "precip6hr":
+                                record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
                             elif element == "maxt":
                                 record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2),
                             elif element == "mint":
@@ -735,7 +926,27 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
         Path(local_file).unlink(missing_ok=True)
 
     shutil.rmtree(temp_download_dir)
-    return pd.DataFrame.from_records(all_records)
+    df = pd.DataFrame.from_records(all_records)
+    # logic for creating accum intervals from total precip for models that output only tp
+    if model == "hrrr" and element == "precip6hr":
+        # Pick the cumulative column name produced by your rename_map
+        candidates = ["precip_accum", "total_precip", "precip_total", "tp_total", "APCP_total"]
+        total_col = next((c for c in candidates if c in df.columns), None)
+        if total_col is not None:
+            df = add_interval_precip_from_total(
+                df, total_col=total_col, out_col="precip_6h", hours=6,
+                group_cols=("station_id", "init_time")
+            )
+    if model == "hrrr" and element == "snow6hr":
+        # Pick the cumulative column name produced by your rename_map
+        candidates = ["snow_accum", "total_snow", "snow_total", "tp_total", "ASNOW_total"]
+        total_col = next((c for c in candidates if c in df.columns), None)
+        if total_col is not None:
+            df = add_interval_precip_from_total(
+                df, total_col=total_col, out_col="snow_6h", hours=6,
+                group_cols=("station_id", "init_time")
+            )
+    return df
 
 
 ## TODO ADD hrrrak, urma, rrfs

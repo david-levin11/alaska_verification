@@ -9,7 +9,7 @@ class ModelArchiver(Archiver):
         super().__init__(config)
         self.start = start or config.OBS_START  # default fallback
         self.wxelement = wxelement or config.ELEMENT
-        if self.wxelement in ["precip24hr"]:
+        if self.wxelement in ["precip24hr", "precip6hr", "snow6hr", "snow24hr"]:
             self.station_df = self.ensure_metadata_precip()
         else:
             self.station_df = self.ensure_metadata()
@@ -81,7 +81,8 @@ class ModelArchiver(Archiver):
 
 if __name__ == "__main__":
     archiver = ModelArchiver(config)
-    files = archiver.fetch_file_list("2025-07-13 00:00:00", "2025-07-14 00:00:00")
+    files = archiver.fetch_file_list("2025-01-30 00:00:00", "2025-01-31 00:00:00")
     print(files)
     df = archiver.process_files(files)
+    print(f'Dataframe is: {df[df['station_id']=='PAJN'].head(10)}')
     df.to_csv("test.csv")

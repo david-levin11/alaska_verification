@@ -8,9 +8,9 @@ import archiver_config as config
 from obs_archiver import ObsArchiver
 
 def run_monthly_obs_archiving(start, end, element, use_local):
-    element_title = element.title()
-
-    if element_title not in config.OBS_VARS:
+    if element.lower() == "wind":
+        element = element.capitalize()  # "wind" → "Wind", etc.
+    if element not in config.OBS_VARS:
         print(f"❌ Element '{element}' not recognized. Valid options: {list(config.OBS_VARS.keys())}")
         sys.exit(1)
 
@@ -20,7 +20,7 @@ def run_monthly_obs_archiving(start, end, element, use_local):
     else:
         config.USE_CLOUD_STORAGE = True
 
-    config.ELEMENT = element_title
+    config.ELEMENT = element
     archiver = ObsArchiver(config)
     stations = archiver.get_station_metadata()
 
@@ -30,12 +30,22 @@ def run_monthly_obs_archiving(start, end, element, use_local):
         if chunk_end > end:
             chunk_end = end
 
-        print(f"\n📆 Fetching OBS {element_title} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
-        df = archiver.fetch_observations(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
-
+        print(f"\n📆 Fetching OBS {element} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
+        if element == "Wind":
+            df = archiver.fetch_observations(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
+        elif element == "precip24hr":
+            df = archiver.fetch_precip_rolling(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"),accum_hours=24, step_hours=12)
+        elif element == "precip6hr":
+            df = archiver.fetch_precip_rolling(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"),accum_hours=6, step_hours=6)
+        elif element == "maxt":
+            df = archiver.fetch_tmax_12to06_timeseries(stations,current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
+        elif element == "mint":
+            df = archiver.fetch_tmin_00to18_timeseries(stations,current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
+        #print(df)
         if df.empty:
             print("⚠️ No data extracted for this chunk.")
         else:
+            
             if config.USE_CLOUD_STORAGE:
                 s3_path = f"{config.S3_URLS['obs']}{current.year}_{current.month:02d}_obs_{element.lower()}_archive.parquet"
                 archiver.write_to_s3(df, s3_path)

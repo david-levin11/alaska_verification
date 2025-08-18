@@ -14,13 +14,14 @@ tempfile.tempdir = config.TMP
 
 def run_monthly_archiving(start, end, element, use_local):
     # Normalize element (e.g., wind → Wind)
-    element_title = element.title()
+    if element.lower() == "wind" or element.lower == "gust":
+        element = element.capitalize()  # "wind" → "Wind", etc.
 
-    if element_title not in config.NDFD_FILE_STRINGS:
+    if element not in config.NDFD_FILE_STRINGS:
         print(f"❌ Element '{element}' not recognized. Valid options: {list(config.NDFD_FILE_STRINGS.keys())}")
         sys.exit(1)
 
-    config.ELEMENT = element_title
+    config.ELEMENT = element
     config.USE_CLOUD_STORAGE = not use_local
 
     archiver = NDFDArchiver(config, start=start.strftime("%Y%m%d%H%M"))
@@ -31,22 +32,23 @@ def run_monthly_archiving(start, end, element, use_local):
         if chunk_end > end:
             chunk_end = end
 
-        print(f"\n📆 Processing {element_title} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
+        print(f"\n📆 Processing {element} from {current:%Y-%m-%d} to {chunk_end:%Y-%m-%d}")
         filtered_files = archiver.fetch_file_list(current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
         #print(filtered_files)
         #sys.exit(1)
-        file_key = config.NDFD_FILE_STRINGS[element_title][0]
+        file_key = config.NDFD_FILE_STRINGS[element][0]
         if not filtered_files[file_key]:
             print(f"⚠️ No data for {current} to {chunk_end}")
         else:
             df = archiver.process_files(filtered_files)
-            filename = f"{current.year}_{current.month:02d}_ndfd_{element_title.lower()}_archive.parquet"
+            #print(f'Dataframe is: {df[df['station_id']=='PAJN'].head(10)}')
+            filename = f"{current.year}_{current.month:02d}_ndfd_{element.lower()}_archive.parquet"
 
             if config.USE_CLOUD_STORAGE:
                 s3_url = f"{config.S3_URLS["ndfd"]}{filename}"
                 archiver.write_to_s3(df, s3_url)
             else:
-                local_path = os.path.join(config.NDFD_DIR, element_title.lower(), filename)
+                local_path = os.path.join(config.NDFD_DIR, element.lower(), filename)
                 archiver.write_local_output(df, local_path)
 
         shutil.rmtree(config.TMP, ignore_errors=True)

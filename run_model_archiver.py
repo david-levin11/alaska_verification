@@ -1,4 +1,5 @@
 import argparse
+import tempfile
 from model_archiver import ModelArchiver
 import archiver_config as config
 import pandas as pd
@@ -6,6 +7,10 @@ from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
+
+# setting temp file dir
+os.makedirs(config.TMP, exist_ok=True)
+tempfile.tempdir = config.TMP
 
 def run_monthly_archiving(start, end, model_name, element, use_local):
 
