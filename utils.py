@@ -60,15 +60,36 @@ def normalize_lons_to_minus180_180(lons):
         lons = ((lons + 180) % 360) - 180
     return lons
 
-def ll_to_index(loclat, loclon, datalats, datalons):
-    datalons = normalize_lons_to_minus180_180(datalons)
+# def ll_to_index(loclat, loclon, datalats, datalons):
+#     datalons = normalize_lons_to_minus180_180(datalons)
 
-    abslat = np.abs(datalats - loclat)
-    abslon = np.abs(datalons - loclon)
+#     abslat = np.abs(datalats - loclat)
+#     abslon = np.abs(datalons - loclon)
+#     c = np.maximum(abslon, abslat)
+#     latlon_idx_flat = np.argmin(c)
+#     latlon_idx = np.unravel_index(latlon_idx_flat, datalons.shape)
+#     return latlon_idx
+
+def ll_to_index(loclat, loclon, datalats, datalons):
+    # Force numeric arrays
+    lat_arr = np.asarray(datalats, dtype=float)
+    lon_arr = np.asarray(datalons, dtype=float)
+
+    # Force numeric scalars (helpful if they arrive as strings)
+    loclat = float(loclat)
+    loclon = float(loclon)
+
+    # Put both grids and point lon into the same -180..180 convention
+    lon_arr = normalize_lons_to_minus180_180(lon_arr)
+    loclon = ((loclon + 180.0) % 360.0) - 180.0
+
+    # Compute simple Chebyshev distance on the grid
+    abslat = np.abs(lat_arr - loclat)
+    abslon = np.abs(lon_arr - loclon)
     c = np.maximum(abslon, abslat)
-    latlon_idx_flat = np.argmin(c)
-    latlon_idx = np.unravel_index(latlon_idx_flat, datalons.shape)
-    return latlon_idx
+
+    idx_flat = np.argmin(c)
+    return np.unravel_index(idx_flat, lon_arr.shape)
 
 def create_wind_metadata(url, token, state, networks, vars, obrange, precip=0):
     if precip==0:
@@ -313,6 +334,49 @@ def labels_for_24h_accum(fcst_hour: int):
 
     return alts
 
+def idx_accum_re(fcst_hour: int, interval: int):
+    """
+    Build a regex that matches ONLY lines like:
+      ':<start>-<end> hour acc@(fcst,dt=<interval> hour),missing=<n>:'
+    Returns None if fcst_hour < interval (no such accumulation).
+    """
+    if fcst_hour < interval:
+        return None
+    start = fcst_hour - interval
+    # colon guards avoid accidental partial matches on other fields
+    pat = rf":{start}-{fcst_hour}\s+hour\s+acc@\(\s*fcst\s*,\s*dt={interval}\s*hour\s*\),missing=\d+:"
+    return re.compile(pat)
+
+def labels_for_day_accum(fcst_hour: int, interval=24):
+    """
+    Return possible index labels for a 24, 48, or 72 hr accumulation ending at fcst_hour.
+    - For non-multiples of 24: "{fcst_hour-24}-{fcst_hour} hour acc fcst"
+      e.g., 30 -> "6-30 hour acc fcst"
+    - For multiples of 24: also include the "day" phrasing
+      e.g., 24 -> "0-1 day acc fcst"; 48 -> "1-2 day acc fcst"
+    """
+    if fcst_hour == 0:
+        return []  # no 24-h accumulation at t=0
+
+    start = max(0, fcst_hour - 24)
+    alts = [f"{start}-{fcst_hour} hour acc fcst"]
+
+    if fcst_hour % 24 == 0:
+        d_end = fcst_hour // 24
+        if interval == 24:
+            d_start = d_end - 1
+        elif interval == 48:
+            d_start = d_end - 2
+        elif interval == 72:
+            d_start = d_end - 3
+        if d_start < 0:
+            print(f"You cannot have a negative day accumulation {d_start}.  Check your download_subset code in utils.py")
+            return []
+        else:
+            alts.insert(0, f"{d_start}-{d_end} day acc fcst")
+
+    return alts
+
 
 def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model="nbm", domain="ak"):
     """
@@ -330,6 +394,9 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
     #base_url = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
     init_times = pd.date_range(start=start, end=end, freq=cycle)
     if model == "nbm":
+        designator = "blend"
+        suite = "core"
+    elif model == "nbm_exp":
         designator = "blend"
         suite = "core"
     elif model == 'hrrr':
@@ -365,6 +432,9 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
         else:
             for fh in fcst_hours:
                 if model == 'nbm':
+                    fxx = f"f{fh:03d}"
+                    relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
+                elif model == "nbm_exp":
                     fxx = f"f{fh:03d}"
                     relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
                 elif model == 'nbmqmd':
@@ -424,7 +494,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         fcst_hour = int(fcst_match.group(1))
         tr_end = fcst_hour
         if element == "precip24hr":
-            accum_alts = labels_for_24h_accum(fcst_hour)
+            accum_alts = labels_for_day_accum(fcst_hour)
             if not accum_alts:
                 # no 24-h accumulation at t=0
                 print("     ℹ️ No 24-h accumulation at forecast hour 0")
@@ -565,10 +635,96 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         if require_all_matches and len(matched_vars) != len(search_strings):
             print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
             return None
+    if model in ["nbm", "nbm_exp"] and element not in config.PROBABILISTIC_ELEMENTS[model]:
+        # Extract forecast hour from filename (e.g., f060)
+        base = os.path.basename(remote_url)
+        fcst_match = re.search(r"f(\d{3})", base)
+        if not fcst_match:
+            print("     ❌ Could not determine forecast hour from filename.")
+            return None
+        fcst_hour = int(fcst_match.group(1))
+        # Generic logic for other models: just match search strings
+        exprs = {s: re.compile(re.escape(s)) for s in search_strings}
+        matched_vars = set()
 
+        for n, line in enumerate(lines, start=1):
+            if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
+                continue
+
+            for search_str, expr in exprs.items():
+                if expr.search(line):
+                    matched_vars.add(search_str)
+                    parts = line.split(':')
+                    rangestart = int(parts[1])
+                    if n < len(lines):
+                        parts_next = lines[n].split(':')
+                        rangeend = int(parts_next[1]) - 1
+                    else:
+                        rangeend = ''
+                    byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
+                    matched_ranges[byte_range] = line
+
+        if require_all_matches and len(matched_vars) != len(search_strings):
+            print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
+            return None 
+
+    if model in ["nbm", "nbm_exp"] and element in config.PROBABILISTIC_ELEMENTS[model]:
+        # Extract forecast hour from filename (e.g., f060)
+        base = os.path.basename(remote_url)
+        fcst_match = re.search(r"f(\d{3})", base)
+        if not fcst_match:
+            print("     ❌ Could not determine forecast hour from filename.")
+            return None
+        fcst_hour = int(fcst_match.group(1))
+
+        if element == "snow24hr":
+            accum_rx = idx_accum_re(fcst_hour, interval=24)
+        elif element == "snow48hr":
+            accum_rx = idx_accum_re(fcst_hour, interval=48)
+        elif element == "snow72hr":
+            accum_rx = idx_accum_re(fcst_hour, interval=72)
+        elif element == "snow6hr":
+            accum_rx = idx_accum_re(fcst_hour, interval=6)
+        else:
+            raise NotImplementedError(...)
+
+        if accum_rx is None:
+            print(f"     ℹ️ No {element} accumulation available at forecast hour {fcst_hour}")
+            return None
+
+        target_perc_values = {5, 10, 25, 50, 75, 90, 95}
+
+        search_exprs = [re.escape(s) for s in search_strings]  # e.g., ["ASNOW", "surface"]
+        search_pattern = re.compile("|".join(search_exprs))
+
+        matched_ranges = {}
+        for n, line in enumerate(lines, start=1):
+            if exclude_phrases and any(p in line for p in exclude_phrases):
+                continue
+            if not search_pattern.search(line):
+                continue
+            # >>> strict match of annotated accumulation text <<<
+            if not accum_rx.search(line):
+                continue
+
+            # keep only desired percentiles
+            last_token = line.split(":")[-1].strip()
+            m = re.match(r"(\d+)% level", last_token)
+            if not m or int(m.group(1)) not in target_perc_values:
+                continue
+
+            parts = line.split(":")
+            rangestart = int(parts[1])
+            if n < len(lines):
+                parts_next = lines[n].split(":")
+                rangeend = int(parts_next[1]) - 1
+            else:
+                rangeend = ""
+            byte_range = f"{rangestart}-{rangeend}" if rangeend else f"{rangestart}-"
+            matched_ranges[byte_range] = line
     # Check if anything was found
     if not matched_ranges:
-        print(f'      ❌ No matches found for {search_strings}')
+        print(f'      ❌ No matches found for {search_strings} for {remote_url} and {local_filename}')
         return None
 
     # Download GRIB subset
@@ -587,6 +743,8 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
 def parse_date_and_time_from_url(remote_url, model):
     url_parts = remote_url.split('/')
     if model == 'nbm':
+        return url_parts[-4], url_parts[-3]
+    elif model == 'nbm_exp':
         return url_parts[-4], url_parts[-3]
     elif model == 'nbmqmd': 
         return url_parts[-4], url_parts[-3]
@@ -721,7 +879,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     station_index_cache = {}  # move it here so it's scoped properly
     all_records = []
     # probabilistic data is processed differently due to issues with cfgrib
-    if model not in  ['nbmqmd', 'nbmqmd_exp']:
+    if model not in  ['nbmqmd', 'nbmqmd_exp'] and element not in config.PROBABILISTIC_ELEMENTS[model]:
         for i, local_file in enumerate(downloaded_files):
             print(f"Now processing {local_file}...")
             try:
@@ -768,7 +926,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                 valid_time = pd.to_datetime(ds.valid_time.values)
                 if model == 'nbm':
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
-                elif model == 'nbmqmd':
+                elif model == 'nbm_exp':
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
                 elif model == 'hrrr':
                     match = re.search(r"f(\d{2,3})", os.path.basename(local_file))
@@ -864,7 +1022,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
             print(f"Now processing {local_file}...")
 
             try:
-                if model == "nbmqmd" or model == "nbmqmd_exp":
+                if model in ['nbmqmd', 'nbmqmd_exp', 'nbm', 'nbm_exp']:
                     # Parse once
                     grbs = list(pygrib.open(local_file))
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
@@ -913,6 +1071,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 record[f"wind_p{perc}"] = round(float(MS_to_KTS(values[iy,ix])),2)
                             elif element == "Gust":
                                 record[f"gust_p{perc}"] = round(float(MS_to_KTS(values[iy,ix])),2)
+                            elif element == "snow24hr":
+                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
+                            elif element == "snow48hr":
+                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
+                            elif element == "snow72hr":
+                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
+                            elif element == "snow6hr":
+                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
                                 #
                             else:
                                 raise NotImplementedError(f"Unit conversions not set up for {element} in {model}.  Check HERBIE_UNIT_CONVERSIONS in archiver_config.py")

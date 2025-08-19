@@ -19,13 +19,21 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     if element.lower() == "wind":
         element = element.capitalize()  # "wind" → "Wind", etc.
     # Validate
-    if element not in config.AVAILABLE_FIELDS[model]:
-        print(f"{element} not found in AVAILABLE_FIELDS for {model} in archiver_config! Must be one of: {list(config.AVAILABLE_FIELDS[model])}.") 
-        print('Check spelling and capitalization or set up archiver for your requested variable')
-        raise NotImplementedError
     if model not in config.HERBIE_MODELS:
         print(f"❌ Model '{model}' not recognized. Valid options: {config.HERBIE_MODELS}")
         sys.exit(1)
+    if element not in config.AVAILABLE_FIELDS[model]:
+        print(f"{element} not found in AVAILABLE_FIELDS for {model} in archiver_config! Must be one of: {list(config.AVAILABLE_FIELDS[model])}.") 
+        print('Check spelling and capitalization or set up archiver for your requested variable')
+        sys.exit(1)
+        # Checking for correct NBM run time if necessary
+    if model in ['nbm', 'nbm_exp', 'nbmqmd', 'nbmqmd_exp']:
+        if start.hour not in config.NBM_START_HOURS[model]:
+            print(f"Start hour for {model} must be one of {config.NBM_START_HOURS[model]}")
+            sys.exit(1)
+        if end.hour not in config.NBM_START_HOURS[model]:
+            print(f"End hour for {model} must be one of {config.NBM_START_HOURS[model]}")
+            sys.exit(1)
 
     if use_local:
         config.USE_CLOUD_STORAGE = False
@@ -87,10 +95,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
-
-    if args.model.lower() not in ['nbm', 'hrrr', 'urma', 'nbmqmd', 'nbmqmd_exp']:
-        print(f"Archiving not yet set up for models other than nbm")
-        raise NotImplementedError
     #print(args.element.title())
 
     run_monthly_archiving(start, end, args.model, args.element, args.local)
