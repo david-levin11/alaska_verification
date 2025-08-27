@@ -7,6 +7,7 @@ from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
+from calendar import monthrange
 
 # setting temp file dir
 os.makedirs(config.TMP, exist_ok=True)
@@ -43,11 +44,19 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
 
     config.MODEL = model_name
     config.ELEMENT = element
-    archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M"))
+    archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M")) 
     current = start
-
     while current <= end:
-        chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+        if model in ['nbmqmd', 'nbmqmd_exp']:
+            # Get the last day of the current month
+            last_day = monthrange(current.year, current.month)[1]
+            month_end = current.replace(day=last_day, hour=23, minute=59)
+
+            # Try to go 10 days ahead, but cap it at the end of the current month
+            chunk_end = min(current + pd.Timedelta(days=10) - pd.Timedelta(minutes=1), month_end)
+        else:
+            chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+
         if chunk_end > end:
             chunk_end = end
 
@@ -78,7 +87,11 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)
 
-        current += relativedelta(months=1)
+        # Advance to the next chunk
+        if model in ['nbmqmd', 'nbmqmd_exp']:
+            current = chunk_end + pd.Timedelta(minutes=1)
+        else:
+            current += relativedelta(months=1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Model Archiver")

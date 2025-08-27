@@ -1,4 +1,5 @@
 import os
+import gc
 import sys
 import re
 import tempfile
@@ -1017,27 +1018,38 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
     # using pygrib to process nbmqmd files
+    # using pygrib to process nbmqmd files
     else:
         for local_file in downloaded_files:
             print(f"Now processing {local_file}...")
 
             try:
                 if model in ['nbmqmd', 'nbmqmd_exp', 'nbm', 'nbm_exp']:
-                    # Parse once
-                    grbs = list(pygrib.open(local_file))
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
-                    valid_time = pd.to_datetime(grbs[1].validDate)
-                    lats, lons = grbs[0].latlons()
-                    #lons = lons - 360
-                    #print(f"Model is nbmqmd")
-                    #print(f"Lons are: {lons[150,150]}")
-                    #tree, grid_shape = build_kdtree(lats, lons)
-                    # Cache all GRIB values by percentile
+
                     grib_fields = {}
-                    for g in grbs:
-                        if hasattr(g, "percentileValue"):
-                            #print(g)
-                            grib_fields[int(g.percentileValue)] = g.values
+                    valid_time = None
+                    lats, lons = None, None
+
+                    with pygrib.open(local_file) as grbs:
+                        for i, g in enumerate(grbs):
+                            # Extract lat/lon from the first record
+                            if lats is None or lons is None:
+                                try:
+                                    lats, lons = g.latlons()
+                                except Exception:
+                                    pass  # Some messages might not support latlons()
+
+                            # Find first validDate
+                            if valid_time is None and hasattr(g, "validDate"):
+                                valid_time = pd.to_datetime(g.validDate)
+
+                            # Cache percentile fields
+                            if hasattr(g, "percentileValue"):
+                                grib_fields[int(g.percentileValue)] = g.values
+
+                    if valid_time is None:
+                        raise ValueError(f"No validDate found in {local_file}")
 
                     # Process all stations
                     for _, row in station_df.iterrows():
@@ -1047,10 +1059,9 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         if stid in station_index_cache:
                             iy, ix = station_index_cache[stid]
                         else:
-                            #iy, ix = query_kdtree(tree, grid_shape, lat, lon)
-                            #station_index_cache[stid] = (iy, ix)
                             iy, ix = ll_to_index(lat, lon, lats, lons)
                             station_index_cache[stid] = (iy, ix)
+
                         record = {
                             "station_id": stid,
                             "init_time": valid_time - pd.to_timedelta(forecast_hour, unit="h"),
@@ -1064,27 +1075,29 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             elif element == "precip6hr":
                                 record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
                             elif element == "maxt":
-                                record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2),
+                                record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
                             elif element == "mint":
                                 record[f"mint_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
                             elif element == "Wind":
-                                record[f"wind_p{perc}"] = round(float(MS_to_KTS(values[iy,ix])),2)
+                                record[f"wind_p{perc}"] = round(float(MS_to_KTS(values[iy, ix])), 2)
                             elif element == "Gust":
-                                record[f"gust_p{perc}"] = round(float(MS_to_KTS(values[iy,ix])),2)
-                            elif element == "snow24hr":
-                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
-                            elif element == "snow48hr":
-                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
-                            elif element == "snow72hr":
-                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
-                            elif element == "snow6hr":
-                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy,ix])),1)
-                                #
+                                record[f"gust_p{perc}"] = round(float(MS_to_KTS(values[iy, ix])), 2)
+                            elif element.startswith("snow"):
+                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy, ix])), 1)
                             else:
-                                raise NotImplementedError(f"Unit conversions not set up for {element} in {model}.  Check HERBIE_UNIT_CONVERSIONS in archiver_config.py")
+                                raise NotImplementedError(
+                                    f"Unit conversions not set up for {element} in {model}. "
+                                    f"Check HERBIE_UNIT_CONVERSIONS in archiver_config.py"
+                                )
+
                         all_records.append(record)
+
                 else:
                     raise NotImplementedError(f"Probabilistic file processing not yet set up for {model}")
+
+                # Free memory
+                gc.collect()
+
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
     # cleaning up
