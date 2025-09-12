@@ -41,7 +41,7 @@ def run_monthly_obs_archiving(start, end, element, use_local):
             df = archiver.fetch_tmax_12to06_timeseries(stations,current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
         elif element == "mint":
             df = archiver.fetch_tmin_00to18_timeseries(stations,current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
-        #print(df)
+        #print(df.head(10))
         if df.empty:
             print("⚠️ No data extracted for this chunk.")
         else:

@@ -7,6 +7,7 @@ from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
+from calendar import monthrange
 
 # setting temp file dir
 os.makedirs(config.TMP, exist_ok=True)
@@ -19,13 +20,21 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     if element.lower() == "wind":
         element = element.capitalize()  # "wind" → "Wind", etc.
     # Validate
-    if element not in config.AVAILABLE_FIELDS[model]:
-        print(f"{element} not found in AVAILABLE_FIELDS for {model} in archiver_config! Must be one of: {list(config.AVAILABLE_FIELDS[model])}.") 
-        print('Check spelling and capitalization or set up archiver for your requested variable')
-        raise NotImplementedError
     if model not in config.HERBIE_MODELS:
         print(f"❌ Model '{model}' not recognized. Valid options: {config.HERBIE_MODELS}")
         sys.exit(1)
+    if element not in config.AVAILABLE_FIELDS[model]:
+        print(f"{element} not found in AVAILABLE_FIELDS for {model} in archiver_config! Must be one of: {list(config.AVAILABLE_FIELDS[model])}.") 
+        print('Check spelling and capitalization or set up archiver for your requested variable')
+        sys.exit(1)
+        # Checking for correct NBM run time if necessary
+    if model in ['nbm', 'nbm_exp', 'nbmqmd', 'nbmqmd_exp']:
+        if start.hour not in config.NBM_START_HOURS[model]:
+            print(f"Start hour for {model} must be one of {config.NBM_START_HOURS[model]}")
+            sys.exit(1)
+        if end.hour not in config.NBM_START_HOURS[model]:
+            print(f"End hour for {model} must be one of {config.NBM_START_HOURS[model]}")
+            sys.exit(1)
 
     if use_local:
         config.USE_CLOUD_STORAGE = False
@@ -35,11 +44,19 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
 
     config.MODEL = model_name
     config.ELEMENT = element
-    archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M"))
+    archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M")) 
     current = start
-
     while current <= end:
-        chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+        if model in ['nbmqmd', 'nbmqmd_exp']:
+            # Get the last day of the current month
+            last_day = monthrange(current.year, current.month)[1]
+            month_end = current.replace(day=last_day, hour=23, minute=59)
+
+            # Try to go 10 days ahead, but cap it at the end of the current month
+            chunk_end = min(current + pd.Timedelta(days=10) - pd.Timedelta(minutes=1), month_end)
+        else:
+            chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+
         if chunk_end > end:
             chunk_end = end
 
@@ -70,7 +87,11 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)
 
-        current += relativedelta(months=1)
+        # Advance to the next chunk
+        if model in ['nbmqmd', 'nbmqmd_exp']:
+            current = chunk_end + pd.Timedelta(minutes=1)
+        else:
+            current += relativedelta(months=1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Model Archiver")
@@ -87,10 +108,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
-
-    if args.model.lower() not in ['nbm', 'hrrr', 'urma', 'nbmqmd', 'nbmqmd_exp']:
-        print(f"Archiving not yet set up for models other than nbm")
-        raise NotImplementedError
     #print(args.element.title())
 
     run_monthly_archiving(start, end, args.model, args.element, args.local)
