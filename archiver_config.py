@@ -498,4 +498,4 @@ MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
 
 #################### Processing Params ########################
 # for process pool operations
-MAX_WORKERS = 8
+MAX_WORKERS = 4
