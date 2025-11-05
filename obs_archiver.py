@@ -22,11 +22,10 @@ class ObsArchiver(Archiver):
     def get_station_metadata(self):
         params = {
             "state": self.state,
-            "network": self.network,
             "hfmetar": self.hfmetar,
             "token": self.api_token,
-            "status": "active",
             "units": "english",
+            "status": "active",
             "complete": "1",
             "format": "json"
         }
@@ -42,6 +41,9 @@ class ObsArchiver(Archiver):
             }
             for s in stations
         }
+        #obs_meta_df = pd.DataFrame(self.station_metadata)
+        #obs_meta_df.to_csv("obs_metadata.csv")
+        #print(f"stations are: {list(self.station_metadata.keys())}")
         return list(self.station_metadata.keys())
     
     @staticmethod
@@ -427,6 +429,8 @@ class ObsArchiver(Archiver):
     def fetch_observations(self, station_ids, start_time, end_time):
         all_obs = []
         for chunk in self._chunk_station_ids(station_ids):
+            #if "ERXA2" in chunk or "CSXA2" in chunk:
+            #    print(f"Now processing these stations: {chunk}")
             attempt = 0
             wait = self.initial_wait
             while attempt < self.max_retries:

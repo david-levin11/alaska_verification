@@ -13,6 +13,7 @@ class ModelArchiver(Archiver):
             self.station_df = self.ensure_metadata_precip()
         else:
             self.station_df = self.ensure_metadata()
+            self.station_df.to_csv(f"{self.wxelement}_obs_sites.csv")
 
     def ensure_metadata(self):
         print(f"Creating metadata for {self.wxelement}")
@@ -28,9 +29,7 @@ class ModelArchiver(Archiver):
                 self.config.METADATA_URL,
                 self.config.API_KEY,
                 self.config.STATE,
-                self.config.NETWORK,
-                meta_element,
-                self.start  # ✅ Use dynamic start date
+                meta_element
             )
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)
@@ -48,8 +47,7 @@ class ModelArchiver(Archiver):
                 self.config.METADATA_URL,
                 self.config.API_KEY,
                 self.config.STATE,
-                self.config.NETWORK,
-                self.start,  # ✅ Use dynamic start date
+                self.config.NETWORK
             )
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)
