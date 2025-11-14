@@ -92,13 +92,11 @@ def ll_to_index(loclat, loclon, datalats, datalons):
     idx_flat = np.argmin(c)
     return np.unravel_index(idx_flat, lon_arr.shape)
 
-def create_wind_metadata(url, token, state, networks, vars, obrange, precip=0):
+def create_wind_metadata(url, token, state, vars, precip=0):
     if precip==0:
         params = {
             "token": token,
             "vars": vars,
-            "obrange": obrange,
-            "network": networks,
             "state": state,
             "output": "json"
         }
@@ -106,8 +104,6 @@ def create_wind_metadata(url, token, state, networks, vars, obrange, precip=0):
         params = {
             "token": token,
             "precip": precip,
-            "obrange": obrange,
-            "network": networks,
             "state": state,
             "output": "json"
         }
@@ -117,11 +113,10 @@ def create_wind_metadata(url, token, state, networks, vars, obrange, precip=0):
     else:
         raise Exception(f"Failed to fetch metadata: {response.status_code}")
 
-def create_precip_metadata(url, token, state, networks, obrange):
+def create_precip_metadata(url, token, state, networks):
     params = {
         "token": token,
         "precip": "1",
-        "obrange": obrange,
         "network": networks,
         "state": state,
         "output": "json"
@@ -881,6 +876,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     all_records = []
     # probabilistic data is processed differently due to issues with cfgrib
     if model not in  ['nbmqmd', 'nbmqmd_exp'] and element not in config.PROBABILISTIC_ELEMENTS[model]:
+        print(f"{element} not a probabilistic element for {model}")
         for i, local_file in enumerate(downloaded_files):
             print(f"Now processing {local_file}...")
             try:
@@ -1020,6 +1016,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     # using pygrib to process nbmqmd files
     # using pygrib to process nbmqmd files
     else:
+        print(f"{element} is probabilistic for {model} so handling accordingly")
         for local_file in downloaded_files:
             print(f"Now processing {local_file}...")
 

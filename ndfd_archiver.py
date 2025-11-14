@@ -29,7 +29,6 @@ class NDFDArchiver(Archiver):
                 self.config.METADATA_URL,
                 self.config.API_KEY,
                 self.config.STATE,
-                self.config.NETWORK,
                 meta_element,
                 self.start  # ✅ Use dynamic start date
             )

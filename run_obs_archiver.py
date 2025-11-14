@@ -23,7 +23,9 @@ def run_monthly_obs_archiving(start, end, element, use_local):
     config.ELEMENT = element
     archiver = ObsArchiver(config)
     stations = archiver.get_station_metadata()
-
+    with open("obs_stations_active.txt","w") as f:
+        f.write(str(stations))
+        f.close()
     current = start
     while current <= end:
         chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
@@ -42,6 +44,7 @@ def run_monthly_obs_archiving(start, end, element, use_local):
         elif element == "mint":
             df = archiver.fetch_tmin_00to18_timeseries(stations,current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
         #print(df.head(10))
+        #df.to_csv("test_obs.csv")
         if df.empty:
             print("⚠️ No data extracted for this chunk.")
         else:

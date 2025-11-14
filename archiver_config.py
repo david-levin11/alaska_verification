@@ -121,17 +121,11 @@ HERBIE_FORECASTS = {
             'Wind': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
             'Gust': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
         },
-		'gfs':{
-            'Wind': [24,48,72,96]
-        },
 		'hrrr':{
             'Wind': [12,18,24,30,36,42,48],
             'precip6hr': [0,6,12,18,24,30,36,42,48],
             'snow6hr': [0,6,12,18,24,30,36,42,48]
         },
-		'rtma':{
-            'Wind':[0]
-          },  # hourly run, no fcsts, just analysis
 		'urma':{
             'Wind':[0]
           }  # same as rtma, no fcsts, just analysis
@@ -141,15 +135,17 @@ HERBIE_FORECASTS = {
 AVAILABLE_FIELDS = {'nbm': ['Wind','snow6hr', 'snow24hr', 'snow48hr', 'snow72hr'],
                     'nbm_exp': ['snow6hr', 'snow24hr','snow48hr', 'snow72hr'],
                     'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint'],
-                    'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust', 'snow6hr', 'snow24hr'],
+                    'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust'],
                     'hrrr': ['Wind', 'precip6hr', 'snow6hr'],
                     'urma': ['Wind']}
 
 PROBABILISTIC_ELEMENTS = {
-    'nbm': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr'],
-    'nbm_exp': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr'],
+    'nbm': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr', 'maxt', 'mint'],
     'nbmqmd': ['precip6hr','precip24hr'],
-    'nbmqmd_exp': ['precip6hr','precip24hr']
+    'nbm_exp': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr'],
+    'nbmqmd_exp': ['precip6hr','precip24hr', 'Wind', 'Gust','maxt', 'mint'],
+    'hrrr': [],
+    'urma': []
 }
 
 HERBIE_CYCLES = {"nbm": "6h","nbm_exp": "6h", "nbmqmd": "12h", "nbmqmd_exp": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
@@ -498,4 +494,4 @@ MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
 
 #################### Processing Params ########################
 # for process pool operations
-MAX_WORKERS = 8
+MAX_WORKERS = 4
