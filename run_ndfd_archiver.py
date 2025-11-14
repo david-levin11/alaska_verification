@@ -22,8 +22,11 @@ def run_monthly_archiving(start, end, element, use_local):
         sys.exit(1)
 
     config.ELEMENT = element
-    config.USE_CLOUD_STORAGE = not use_local
-
+    if use_local:
+        config.USE_CLOUD_STORAGE = False
+        print("📁 Local storage enabled (S3 writing disabled).")
+    else:
+        config.USE_CLOUD_STORAGE = True
     archiver = NDFDArchiver(config, start=start.strftime("%Y%m%d%H%M"))
     current = start
 

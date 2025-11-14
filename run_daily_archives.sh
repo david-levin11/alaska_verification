@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Wrapper to call the archiver per model/element on a daily UTC window.
 # Special hours:
-#   - nbm, nbm_exp: START=YYYYmmdd0100, END=(YYYYmmdd+1)0000
-#   - others:       START=YYYYmmdd0000, END=YYYYmmdd2300
+#   - nbm, nbm_exp: START=YYYYmmdd0100, END=(YYYYmmdd+1)0100
+#   - others:       START=YYYYmmdd0000, END=(YYYYmmdd+1)0000
 #
 # Usage:
 #   ./run_daily_archives.sh                 # uses yesterday UTC
@@ -13,6 +13,10 @@
 #   DRY_RUN=1
 #   LOG_DIR=/path
 #   MODELS="nbm hrrr"
+#   RUN_NDFD=1           # 0 to skip the NDFD loop
+#   NDFD_ELEMENTS="..."  # optional override for NDFD elements
+#   RUN_OBS=1            # 0 to skip the OBS loop
+#   OBS_ELEMENTS="..."   # optional override for OBS elements
 
 set -Eeuo pipefail
 
@@ -24,6 +28,12 @@ declare -A AVAILABLE_FIELDS=(
   [hrrr]="Wind precip6hr snow6hr"
   [urma]="Wind"
 )
+
+# NDFD elements (keys of your NDFD_DICT)
+DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "precip6hr" "maxt" "mint" "snow6hr")
+
+# OBS elements
+DEFAULT_OBS_ELEMENTS=("Wind" "precip24hr" "precip6hr" "maxt" "mint")
 
 ts() { date -u +"%Y-%m-%d %H:%M:%S UTC"; }
 log_info()  { echo "[$(ts)] [INFO ] $*"; }
@@ -50,7 +60,6 @@ fi
 
 # Determine base UTC date (the "day" we’re running)
 if [[ -n "${START_ARG}" && -n "${END_ARG}" ]]; then
-  # Explicit override; we'll pass through as-is for all models
   GLOBAL_START="${START_ARG}"
   GLOBAL_END="${END_ARG}"
 else
@@ -76,6 +85,10 @@ else
 fi
 
 RC=0
+
+# -------------------------------
+# Main model→element loop (NBM/HRRR/URMA/NBMQMD*)
+# -------------------------------
 for model in "${MODEL_LIST[@]}"; do
   if [[ -z "${AVAILABLE_FIELDS[$model]+set}" ]]; then
     log_warn "Model '${model}' not in AVAILABLE_FIELDS; skipping." | tee -a "$LOG_FILE"
@@ -120,5 +133,91 @@ for model in "${MODEL_LIST[@]}"; do
     fi
   done
 done
+
+# -------------------------------
+# NDFD loop (elements = keys of NDFD_DICT)
+# -------------------------------
+RUN_NDFD="${RUN_NDFD:-1}"
+if [[ "$RUN_NDFD" == "1" ]]; then
+  if [[ -n "${NDFD_ELEMENTS:-}" ]]; then
+    read -r -a NDFD_ELEMS <<< "${NDFD_ELEMENTS}"
+  else
+    NDFD_ELEMS=("${DEFAULT_NDFD_ELEMENTS[@]}")
+  fi
+
+  for element in "${NDFD_ELEMS[@]}"; do
+    if [[ -n "${GLOBAL_START:-}" && -n "${GLOBAL_END:-}" ]]; then
+      NDFD_START="${GLOBAL_START}"
+      NDFD_END="${GLOBAL_END}"
+    else
+      NDFD_START="$(date -u -d "${BASE_DATE} 00:00" +%Y%m%d%H)00"
+      NDFD_END="$(date -u -d "${BASE_DATE} +1 day 00:00" +%Y%m%d%H)00"
+    fi
+
+    ndfd_cmd=( python run_ndfd_archiver.py
+               --start "${NDFD_START}"
+               --end "${NDFD_END}"
+               --element "${element}"
+               --local )
+
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+      log_info "DRY_RUN: ${ndfd_cmd[*]}" | tee -a "$LOG_FILE"
+      continue
+    fi
+
+    log_info "Running: ${ndfd_cmd[*]}" | tee -a "$LOG_FILE"
+    if "${ndfd_cmd[@]}" >>"$LOG_FILE" 2>&1; then
+      log_info "OK: NDFD element=${element} (START=${NDFD_START} END=${NDFD_END})" | tee -a "$LOG_FILE"
+    else
+      log_error "FAILED: NDFD element=${element} (START=${NDFD_START} END=${NDFD_END})" | tee -a "$LOG_FILE"
+      RC=1
+    fi
+  done
+else
+  log_info "RUN_NDFD=0 → skipping NDFD loop." | tee -a "$LOG_FILE"
+fi
+
+# -------------------------------
+# OBS loop
+# -------------------------------
+RUN_OBS="${RUN_OBS:-1}"
+if [[ "$RUN_OBS" == "1" ]]; then
+  if [[ -n "${OBS_ELEMENTS:-}" ]]; then
+    read -r -a OBS_ELEMS <<< "${OBS_ELEMENTS}"
+  else
+    OBS_ELEMS=("${DEFAULT_OBS_ELEMENTS[@]}")
+  fi
+
+  for element in "${OBS_ELEMS[@]}"; do
+    if [[ -n "${GLOBAL_START:-}" && -n "${GLOBAL_END:-}" ]]; then
+      OBS_START="${GLOBAL_START}"
+      OBS_END="${GLOBAL_END}"
+    else
+      OBS_START="$(date -u -d "${BASE_DATE} 00:00" +%Y%m%d%H)00"
+      OBS_END="$(date -u -d "${BASE_DATE} +1 day 00:00" +%Y%m%d%H)00"
+    fi
+
+    obs_cmd=( python run_obs_archiver.py
+              --start "${OBS_START}"
+              --end "${OBS_END}"
+              --element "${element}"
+              --local )
+
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+      log_info "DRY_RUN: ${obs_cmd[*]}" | tee -a "$LOG_FILE"
+      continue
+    fi
+
+    log_info "Running: ${obs_cmd[*]}" | tee -a "$LOG_FILE"
+    if "${obs_cmd[@]}" >>"$LOG_FILE" 2>&1; then
+      log_info "OK: OBS element=${element} (START=${OBS_START} END=${OBS_END})" | tee -a "$LOG_FILE"
+    else
+      log_error "FAILED: OBS element=${element} (START=${OBS_START} END=${OBS_END})" | tee -a "$LOG_FILE"
+      RC=1
+    fi
+  done
+else
+  log_info "RUN_OBS=0 → skipping OBS loop." | tee -a "$LOG_FILE"
+fi
 
 exit "$RC"
