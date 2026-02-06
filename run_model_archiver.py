@@ -47,7 +47,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M")) 
     current = start
     while current <= end:
-        if model in ['nbmqmd', 'nbmqmd_exp']:
+        if model in ['nbmqmd', 'nbmqmd_exp', 'nbm', 'nbm_exp', 'hrrr', 'urma']:
             # Get the last day of the current month
             last_day = monthrange(current.year, current.month)[1]
             month_end = current.replace(day=last_day, hour=23, minute=59)
