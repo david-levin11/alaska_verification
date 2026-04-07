@@ -900,7 +900,18 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             },
                         decode_timedelta=True,
                     )
+                elif model == "nbm_exp":
+                    ds = xr.open_dataset(
+                        local_file,
+                        engine="cfgrib",
+                        backend_kwargs={
+                            "indexpath": "",
+                            "errors": "ignore"
+                            },
+                        decode_timedelta=True,
+                    )
                 else:
+                    print(f"Model is {model} so will use cfgrib with keys: typeOfLevel:heightAboveGround, stepType: instant, level:10.  This may need to change if using different field or model that is not URMA")
                     ds = xr.open_dataset(
                         local_file,
                         engine="cfgrib",
@@ -954,7 +965,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         "valid_time": valid_time,
                         "forecast_hour": forecast_hour,
                     }
-                    if model == 'nbm' or model == 'urma':
+                    if model == 'nbm' or model == 'urma' or model == "nbm_exp":
                         for grib_var, renamed_var in rename_map.items():
                             if grib_var not in ds:
                                 continue
