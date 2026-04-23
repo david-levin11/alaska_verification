@@ -2,14 +2,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from data_loader import fetch_data
-# 1. Import ALL your plotting functions
 from plots import (
-    plot_probabilistic_timeseries,
+    plot_storm_timeseries,  
     plot_forecast_bias_bar_chart,
     plot_confusion_matrix,
     plot_threshold_reliability,
     plot_quantile_rank_histogram
-    )
+)
 
 # Streamlit Page Configuration
 st.set_page_config(page_title="Weather Verification", layout="wide")
@@ -32,177 +31,173 @@ category_labels_dict = {
     "Beaufort Category": [beaufort_bins, beaufort_labels, list(beaufort_labels.keys()), "beaufort_cat_model", "beaufort_cat_obs"]
 }
 
-# --- Sidebar User Interface ---
-st.sidebar.title("Configuration")
-
+# ==========================================
+# SIDEBAR: Global Settings
+# ==========================================
+st.sidebar.title("Global Settings")
 aws_key = st.sidebar.text_input("AWS Access Key", type="password")
 aws_secret = st.sidebar.text_input("AWS Secret Key", type="password")
-
 st.sidebar.markdown("---")
-analysis_mode = st.sidebar.selectbox("Analysis Mode", ["Aggregate Verification", "Storm Specific Zoom"])
 
 model = st.sidebar.selectbox("Model", ["nbmqmd_exp", "nbm", "hrrr", "ndfd"])
-percentile = st.sidebar.selectbox("Verification Percentile (for NBM)", ["5", "10", "25", "50", "75", "90", "95"], index=4)
+percentile = st.sidebar.selectbox("Verification Percentile", ["5", "10", "25", "50", "75", "90", "95"], index=4)
 obs = st.sidebar.selectbox("Verification Source", ["obs", "urma"])
 
 group_name = st.sidebar.text_input("Group Name", "Lynn Canal")
-station_ids_input = st.sidebar.text_input("Station IDs (comma separated)", "EROWC, LIXA2, NKXA2, RIXA2")
+station_ids_input = st.sidebar.text_input("Station IDs (comma separated)", "EROWC, LIXA2, RIXA2, NKXA2")
 station_list = [s.strip() for s in station_ids_input.split(',')]
 
-if analysis_mode == "Aggregate Verification":
-    forecast_projection = st.sidebar.selectbox("Projection", ["Day1", "Day2", "Day3", "Day4", "Day5", "Day6", "Day7"])
-    criteria = st.sidebar.selectbox("Verification Criteria", ["Marine Category", "Beaufort Category"])
-    start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2025-10-01"))
-    end_date = st.sidebar.date_input("End Date", pd.to_datetime("2026-03-17"))
-    wind_threshold = st.sidebar.number_input("Reliability Wind Threshold (kts)", value=25)
-    
-    # --- Define the variable here so it always exists for fetch_data ---
-    storm_init_time = None 
-    
-else:
-    storm_station = st.sidebar.text_input("Storm Station", "EROWC")
-    storm_init_time = st.sidebar.text_input("Storm Init Time", "2026-02-21 00:00:00")
-    start_date = st.sidebar.date_input("Storm Start Date", pd.to_datetime("2026-02-21"))
-    end_date = st.sidebar.date_input("Storm End Date", pd.to_datetime("2026-02-23"))
-    
-    # Provide placeholders for aggregate variables so they don't break either
-    forecast_projection = "Day1" 
-    criteria = "Beaufort Category"
-    wind_threshold = 25
+# ==========================================
+# MAIN APP AREA & TABS
+# ==========================================
+st.title("Weather Model Verification Dashboard")
 
-# --- Main App Execution ---
-st.title("Alaska Wind Verification Dashboard")
+# Create the two tabs
+tab_agg, tab_storm = st.tabs(["📊 Aggregate Verification", "🌪️ Storm Specific Zoom"])
 
-if st.sidebar.button("Run Verification"):
-    if not aws_key or not aws_secret:
-        st.error("Please enter your AWS credentials.")
-    else:
-        with st.spinner("Fetching data from database..."):
-            forecast_hours = fcst_hrs_dict.get(model, {}).get(forecast_projection, [])
-            
-            modeldf, obdf, error_msg = fetch_data(
-                aws_key, aws_secret, analysis_mode, model, obs, start_date, end_date, 
-                station_list, forecast_hours, storm_init_time, percentile_col_dict, percentile
-            )
-            
-        if error_msg:
-            st.error(error_msg)
+# ---------------------------------------------------------
+# TAB 1: Aggregate Verification
+# ---------------------------------------------------------
+with tab_agg:
+    st.header("Aggregate Statistics")
+    
+    # Layout inputs using columns
+    c1, c2, c3 = st.columns(3)
+    forecast_projection = c1.selectbox("Forecast Projection", ["Day1", "Day2", "Day3", "Day4", "Day5", "Day6", "Day7"])
+    agg_start_date = c2.date_input("Start Date", pd.to_datetime("2025-10-01"))
+    agg_end_date = c3.date_input("End Date", pd.to_datetime("2026-03-17"))
+    
+    c4, c5 = st.columns(2)
+    criteria = c4.selectbox("Verification Criteria", ["Marine Category", "Beaufort Category"])
+    wind_threshold = c5.number_input("Reliability Wind Threshold (kts)", value=25)
+    
+    st.markdown("##### Wind Direction Filter")
+    use_dir_filter = st.checkbox("Filter by Observed Wind Direction?")
+    if use_dir_filter:
+        d1, d2 = st.columns(2)
+        min_dir = d1.number_input("Minimum Direction (Degrees)", min_value=0, max_value=360, value=315)
+        max_dir = d2.number_input("Maximum Direction (Degrees)", min_value=0, max_value=360, value=45)
+        st.caption("Tip: If Min > Max (e.g., 315 to 45), it filters across North (360°).")
+    
+    # Button for Tab 1
+    if st.button("Run Aggregate Verification", type="primary"):
+        if not aws_key or not aws_secret:
+            st.error("Please enter your AWS credentials in the sidebar.")
         else:
-            st.success("Data fetched successfully!")
-            
-            with st.spinner("Generating visuals..."):
-                if analysis_mode == "Storm Specific Zoom":
-                    if model in ["nbmqmd", "nbmqmd_exp"]:
-                        modeldf = modeldf.rename(columns={"wind_speed_kt":percentile_col_dict[model][percentile]})
-                        fig = plot_probabilistic_timeseries(
-                            model_df=modeldf, obs_df=obdf, target_station=storm_station,
-                            target_init_time=storm_init_time, plot_start=start_date, 
-                            plot_end=end_date, model=model
-                        )
-                        st.pyplot(fig)
-                    else:
-                        st.warning("Plume charts require a probabilistic model.")
+            with st.spinner("Fetching and processing aggregate data..."):
+                forecast_hours = fcst_hrs_dict.get(model, {}).get(forecast_projection, [])
                 
+                modeldf, obdf, error_msg = fetch_data(
+                    aws_key, aws_secret, "Aggregate Verification", model, obs, agg_start_date, agg_end_date, 
+                    station_list, forecast_hours, None, percentile_col_dict, percentile
+                )
+                
+            if error_msg:
+                st.error(error_msg)
+            else:
+                raw_obs_col = "obs_wind_speed_kts" if "obs_wind_speed_kts" in obdf.columns else "wind_speed_kt"
+                
+                # 1. Bin categories
+                modeldf[category_labels_dict[criteria][3]] = pd.cut(modeldf["wind_speed_kt"], bins=category_labels_dict[criteria][0], labels=category_labels_dict[criteria][2])
+                obdf[category_labels_dict[criteria][4]] = pd.cut(obdf[raw_obs_col], bins=category_labels_dict[criteria][0], labels=category_labels_dict[criteria][2])
+                
+                # 2. Merge Dataframes
+                if obs == "obs":
+                    obdf.rename(columns={'stid': 'station_id'}, inplace=True, errors='ignore')
+                    modeldf['valid_time'] = modeldf['valid_time'].astype('datetime64[ns]')
+                    obdf['valid_time'] = obdf['valid_time'].astype('datetime64[ns]')
+                    modeldf = modeldf.sort_values(['valid_time', 'station_id', 'forecast_hour'])
+                    obdf = obdf.sort_values(['valid_time', 'station_id'])
+                    
+                    merged = pd.merge_asof(
+                        modeldf, obdf, on='valid_time', by='station_id',
+                        direction='nearest', tolerance=pd.Timedelta("1H")
+                    )
                 else:
-                    # --- Aggregate Verification Logic ---
-                    raw_obs_col = "obs_wind_speed_kts" if "obs_wind_speed_kts" in obdf.columns else "wind_speed_kt"
-                    
-                    # 1. Bin the categories
-                    modeldf[category_labels_dict[criteria][3]] = pd.cut(modeldf["wind_speed_kt"], bins=category_labels_dict[criteria][0], labels=category_labels_dict[criteria][2])
-                    obdf[category_labels_dict[criteria][4]] = pd.cut(obdf[raw_obs_col], bins=category_labels_dict[criteria][0], labels=category_labels_dict[criteria][2])
-                    
-                    # 2. Merge Dataframes
-                    if obs == "obs":
-                        obdf.rename(columns={'stid': 'station_id'}, inplace=True, errors='ignore')
-                        
-                        # --- FIX: Force both timelines to nanosecond resolution ---
-                        modeldf['valid_time'] = modeldf['valid_time'].astype('datetime64[ns]')
-                        obdf['valid_time'] = obdf['valid_time'].astype('datetime64[ns]')
-                        
-                        modeldf = modeldf.sort_values(['valid_time', 'station_id', 'forecast_hour'])
-                        obdf = obdf.sort_values(['valid_time', 'station_id'])
-                        
-                        merged = pd.merge_asof(
-                                                modeldf,
-                                                obdf,
-                                                on='valid_time',
-                                                by='station_id',
-                                                direction='nearest',
-                                                tolerance=pd.Timedelta("1h")  # Optional, adjust as needed
-                                            )
+                    merged = pd.merge(
+                        modeldf, obdf[["valid_time", "wind_speed_kt", category_labels_dict[criteria][4]]],
+                        on="valid_time", suffixes=("_model", "_obs")
+                    )
+
+                merged[category_labels_dict[criteria][4]] = pd.to_numeric(merged[category_labels_dict[criteria][4]])
+                merged[category_labels_dict[criteria][3]] = pd.to_numeric(merged[category_labels_dict[criteria][3]])
+
+                # 3. Apply Wind Direction Filter
+                if use_dir_filter:
+                    dir_col_name = "wind_dir" if "wind_dir" in merged.columns else "obs_wind_dir_deg" 
+                    if dir_col_name in merged.columns:
+                        if min_dir <= max_dir:
+                            merged = merged[(merged[dir_col_name] >= min_dir) & (merged[dir_col_name] <= max_dir)]
+                        else:
+                            merged = merged[(merged[dir_col_name] >= min_dir) | (merged[dir_col_name] <= max_dir)]
+                        st.info(f"Filtered to wind directions between {min_dir}° and {max_dir}°. ({len(merged)} valid pairs remain).")
+                        if merged.empty:
+                            st.error("No data points fell within that wind direction range!")
+                            st.stop()
                     else:
-                        merged = pd.merge(
-                            modeldf, obdf[["valid_time", "wind_speed_kt", category_labels_dict[criteria][4]]],
-                            on="valid_time", suffixes=("_model", "_obs")
-                        )
+                        st.warning("Could not find a wind direction column. Proceeding with all data.")
 
-                    merged[category_labels_dict[criteria][4]] = pd.to_numeric(merged[category_labels_dict[criteria][4]])
-                    merged[category_labels_dict[criteria][3]] = pd.to_numeric(merged[category_labels_dict[criteria][3]])
+                # 4. Draw Plots
+                st.subheader("Categorical Verification")
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig_bias = plot_forecast_bias_bar_chart(merged, category_labels_dict[criteria][4], category_labels_dict[criteria][3], model, obs, group_name, agg_start_date, agg_end_date, forecast_projection, category_labels_dict[criteria][1], varname=percentile_col_dict[model][percentile])
+                    st.pyplot(fig_bias)
+                with col2:
+                    fig_conf = plot_confusion_matrix(merged, category_labels_dict[criteria][4], category_labels_dict[criteria][3], model, obs, group_name, agg_start_date, agg_end_date, forecast_projection, category_labels_dict[criteria][1],varname=percentile_col_dict[model][percentile])
+                    st.pyplot(fig_conf)
 
-                    # 3. Generate and display plots using columns for a clean layout
-                    st.subheader("Categorical Verification")
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if model in ["nbmqmd", "nbmqmd_exp"]:
-                            fig_bias = plot_forecast_bias_bar_chart(
-                            merged_df=merged, category_col_obs=category_labels_dict[criteria][4],
-                            category_col_model=category_labels_dict[criteria][3], model=model, obs=obs,
-                            station_id=group_name, start_date=start_date, end_date=end_date,
-                            forecast_projection=forecast_projection, category_labels=category_labels_dict[criteria][1],
-                            percentile=percentile,
-                            varname=percentile_col_dict[model][percentile]
-                            )
-                        else:
-                            fig_bias = plot_forecast_bias_bar_chart(
-                            merged_df=merged, category_col_obs=category_labels_dict[criteria][4],
-                            category_col_model=category_labels_dict[criteria][3], model=model, obs=obs,
-                            station_id=group_name, start_date=start_date, end_date=end_date,
-                            forecast_projection=forecast_projection, category_labels=category_labels_dict[criteria][1]
-                            )
-                        st.pyplot(fig_bias)
-
-                    with col2:
-                        if model in ["nbmqmd", "nbmqmd_exp"]:
-                            fig_conf = plot_confusion_matrix(
-                            merged_df=merged, category_col_obs=category_labels_dict[criteria][4],
-                            category_col_model=category_labels_dict[criteria][3], model=model, obs=obs,
-                            station_id=group_name, start_date=start_date, end_date=end_date,
-                            forecast_projection=forecast_projection, category_labels=category_labels_dict[criteria][1],
-                            percentile=percentile,
-                            varname=percentile_col_dict[model][percentile],
-                            criteria=criteria
-                            )
-                        else:
-                            fig_conf = plot_confusion_matrix(
-                                merged_df=merged, category_col_obs=category_labels_dict[criteria][4],
-                                category_col_model=category_labels_dict[criteria][3], model=model, obs=obs,
-                                station_id=group_name, start_date=start_date, end_date=end_date,
-                                forecast_projection=forecast_projection, category_labels=category_labels_dict[criteria][1]
-                            )
-                        st.pyplot(fig_conf)
-
-                    # 4. Probabilistic Plots
-                    if model in ["nbmqmd", "nbmqmd_exp"]:
-                        st.markdown("---")
-                        st.subheader("Probabilistic Verification")
-                        col3, col4 = st.columns(2)
+                if model in ["nbmqmd", "nbmqmd_exp"]:
+                    st.markdown("---")
+                    st.subheader("Probabilistic Verification")
+                    col3, col4 = st.columns(2)
+                    merged_rel = merged.rename(columns={"wind_speed_kt":percentile_col_dict[model][percentile]}) if "wind_speed_kt" in merged.columns and percentile_col_dict[model][percentile] not in merged.columns else merged.copy()
                         
-                        if "wind_speed_kt" in merged.columns and percentile_col_dict[model][percentile] not in merged.columns:
-                            merged_rel = merged.rename(columns={"wind_speed_kt":percentile_col_dict[model][percentile]})
-                        else:
-                            merged_rel = merged.copy()
-                            
-                        with col3:
-                            fig_rel = plot_threshold_reliability(
-                                merged_df=merged_rel, threshold=wind_threshold, model=model, obs=obs,
-                                station_id=group_name, start_date=start_date, end_date=end_date
-                            )
-                            st.pyplot(fig_rel)
-                            
-                        with col4:
-                            fig_rank = plot_quantile_rank_histogram(
-                                merged_df=merged_rel, model=model, station_id=group_name,
-                                start_date=start_date, end_date=end_date
-                            )
-                            st.pyplot(fig_rank)
+                    with col3:
+                        fig_rel = plot_threshold_reliability(merged_rel, wind_threshold, model, obs, group_name, agg_start_date, agg_end_date)
+                        st.pyplot(fig_rel)
+                    with col4:
+                        fig_rank = plot_quantile_rank_histogram(merged_rel, model, group_name, agg_start_date, agg_end_date)
+                        st.pyplot(fig_rank)
+
+
+# ---------------------------------------------------------
+# TAB 2: Storm Specific Zoom
+# ---------------------------------------------------------
+with tab_storm:
+    st.header("Plume Chart Generation")
+    
+    s1, s2 = st.columns(2)
+    storm_station = s1.text_input("Target Station", "EROWC")
+    storm_init_time = s2.text_input("Model Init Time (YYYY-MM-DD HH:MM:SS)", "2026-02-21 00:00:00")
+    
+    s3, s4 = st.columns(2)
+    storm_start = s3.date_input("Plot Start Date", pd.to_datetime("2026-02-21"))
+    storm_end = s4.date_input("Plot End Date", pd.to_datetime("2026-02-24"))
+    
+    # Button for Tab 2
+    if st.button("Generate Storm Timeseries", type="primary"):
+        if not aws_key or not aws_secret:
+            st.error("Please enter your AWS credentials in the sidebar.")
+        else:
+            with st.spinner(f"Fetching data for {storm_station}..."):
+                modeldf, obdf, error_msg = fetch_data(
+                    aws_key, aws_secret, "Storm Specific Zoom", model, obs, storm_start, storm_end, 
+                    [storm_station.strip()], [], storm_init_time, percentile_col_dict, percentile
+                )
+                
+            if error_msg:
+                st.error(error_msg)
+            else:
+                # Call our updated function name
+                fig = plot_storm_timeseries(
+                    model_df=modeldf, obs_df=obdf, target_station=storm_station.strip(),
+                    target_init_time=storm_init_time, plot_start=storm_start, 
+                    plot_end=storm_end, model=model
+                )
+                
+                # Check if fig is None (which happens if model_plot_df was empty)
+                if fig:
+                    st.pyplot(fig)
+                else:
+                    st.warning("Could not generate chart due to missing data.")

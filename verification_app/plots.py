@@ -4,47 +4,80 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.patches as patches
 
-def plot_probabilistic_timeseries(model_df, obs_df, target_station, target_init_time, plot_start, plot_end, model):
-    """Plume chart returning a matplotlib Figure object."""
-    
+def plot_storm_timeseries(
+    model_df,
+    obs_df,
+    target_station,
+    target_init_time,
+    plot_start,
+    plot_end,
+    model,
+    savepath=None
+):
+    """
+    Creates a time series chart for a specific station and model run.
+    Draws a plume for probabilistic models, or a single line for deterministic models.
+    """
+    # 1. Determine Model Column
+    is_probabilistic = model in ["nbmqmd", "nbmqmd_exp"]
+    model_col = 'wind_p50' if is_probabilistic else 'wind_speed_kt'
+
+    # Catch if deterministic model uses a slightly different column name
+    if not is_probabilistic and model_col not in model_df.columns:
+        # Fallback if standard name isn't found
+        possible_cols = [c for c in model_df.columns if 'wind' in c.lower()]
+        model_col = possible_cols[0] if possible_cols else model_df.columns[-1]
+
+    # 2. Process Model Data
     model_plot_df = model_df[
         (model_df['station_id'] == target_station) &
         (model_df['init_time'] == pd.to_datetime(target_init_time)) &
         (model_df['valid_time'] >= pd.to_datetime(plot_start)) &
         (model_df['valid_time'] <= pd.to_datetime(plot_end))
-    ].copy().dropna(subset=['wind_p50']).sort_values('valid_time')
+    ].copy()
 
+    model_plot_df = model_plot_df.dropna(subset=[model_col]).sort_values('valid_time')
+
+    if model_plot_df.empty:
+        print(f"No model data found for {target_station} initialized at {target_init_time}.")
+        return None
+
+    # 3. Process Observation Data
     obs_station_col = 'station_id' if 'station_id' in obs_df.columns else 'stid'
     raw_obs_col = "obs_wind_speed_kts" if "obs_wind_speed_kts" in obs_df.columns else "wind_speed_kt"
 
     obs_plot_df = obs_df[
         (obs_df[obs_station_col] == target_station) &
-        (obs_df['valid_time'] >= model_df['valid_time'].min()) &
-        (obs_df['valid_time'] <= model_df['valid_time'].max())
+        (obs_df['valid_time'] >= pd.to_datetime(plot_start)) &
+        (obs_df['valid_time'] <= pd.to_datetime(plot_end))
     ].copy().dropna(subset=[raw_obs_col]).sort_values('valid_time')
 
-    # Assign fig, ax so we can return it to Streamlit
+    # 4. Plotting
     fig, ax = plt.subplots(figsize=(12, 6))
     
     model_dates = model_plot_df['valid_time']
     obs_dates = obs_plot_df['valid_time']
     
-    ax.fill_between(model_dates, model_plot_df['wind_p10'], model_plot_df['wind_p90'], color='#99CCFF', alpha=0.4, label='10th-90th Percentile')
-    ax.fill_between(model_dates, model_plot_df['wind_p25'], model_plot_df['wind_p75'], color='#003399', alpha=0.4, label='25th-75th Percentile')
-    ax.plot(model_dates, model_plot_df['wind_p50'], color='#000066', linewidth=2, linestyle='--', label='50th Percentile (Median)')
+    # Draw Model Data
+    if is_probabilistic:
+        ax.fill_between(model_dates, model_plot_df['wind_p10'], model_plot_df['wind_p90'], color='#99CCFF', alpha=0.4, label='10th-90th Percentile')
+        ax.fill_between(model_dates, model_plot_df['wind_p25'], model_plot_df['wind_p75'], color='#003399', alpha=0.4, label='25th-75th Percentile')
+        ax.plot(model_dates, model_plot_df['wind_p50'], color='#000066', linewidth=2, linestyle='--', label='50th Percentile (Median)')
+    else:
+        ax.plot(model_dates, model_plot_df[model_col], color='#000066', linewidth=2, linestyle='-', label=f'{model.upper()} Forecast')
     
+    # Draw Observations
     if not obs_plot_df.empty:
         ax.plot(obs_dates, obs_plot_df[raw_obs_col], color='#CC0000', linewidth=2.5, marker='o', markersize=4, label='Observed')
 
     ax.set_ylabel('Wind Speed (kts)', fontsize=12)
     ax.set_xlabel('Valid Time (UTC)', fontsize=12)
-    ax.set_title(f"{model.upper()} Plume for Init: {target_init_time} at {target_station.upper()}\nValid: {plot_start} to {plot_end}")
+    ax.set_title(f"{model.upper()} Forecast Init: {target_init_time} at {target_station.upper()}\nValid: {plot_start} to {plot_end}")
     ax.legend(loc='upper left')
     ax.grid(True, linestyle=':', alpha=0.7)
     plt.xticks(rotation=45)
     plt.tight_layout()
 
-    # RETURN the figure instead of showing it
     return fig
 
 
