@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from scipy.spatial import cKDTree
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import archiver_config as config  # Update 'your_module' with actual config import path
+import archiver_config as config  
 
 station_index_cache = {}
 
@@ -61,15 +61,6 @@ def normalize_lons_to_minus180_180(lons):
         lons = ((lons + 180) % 360) - 180
     return lons
 
-# def ll_to_index(loclat, loclon, datalats, datalons):
-#     datalons = normalize_lons_to_minus180_180(datalons)
-
-#     abslat = np.abs(datalats - loclat)
-#     abslon = np.abs(datalons - loclon)
-#     c = np.maximum(abslon, abslat)
-#     latlon_idx_flat = np.argmin(c)
-#     latlon_idx = np.unravel_index(latlon_idx_flat, datalons.shape)
-#     return latlon_idx
 
 def ll_to_index(loclat, loclon, datalats, datalons):
     # Force numeric arrays
