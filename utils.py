@@ -464,7 +464,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
     """
     Download a subset of a GRIB2 file based on .idx entries matching search_strings.
 
-    If model == "nbmqpd", apply special logic to match 24-hr APCP percentiles.
+    If model == "nbmqmd", apply special logic to match 24-hr APCP percentiles.
     """
     print(f"  > Downloading subset for {os.path.basename(remote_url)}")
     os.makedirs(os.path.dirname(local_filename), exist_ok=True)
@@ -1025,7 +1025,6 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
     # using pygrib to process nbmqmd files
-    # using pygrib to process nbmqmd files
     else:
         print(f"{element} is probabilistic for {model} so handling accordingly")
         for local_file in downloaded_files:
@@ -1136,5 +1135,3 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     return df
 
 
-## TODO ADD hrrrak, urma, rrfs
-## TODO ADD temp, precip vars
