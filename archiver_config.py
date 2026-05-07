@@ -112,7 +112,9 @@ HERBIE_FORECASTS = {
             'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
             'precip6hr': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
             'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
-            'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174]
+            'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'Wind': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
+            'Gust': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168]
         },
         'nbmqmd_exp': {
             'precip24hr': [24,30,36,48,60,72,84,96,108,120,132,144,156,168],
@@ -135,14 +137,14 @@ HERBIE_FORECASTS = {
 
 AVAILABLE_FIELDS = {'nbm': ['Wind','snow6hr', 'snow24hr', 'snow48hr', 'snow72hr'],
                     'nbm_exp': ['snow6hr', 'snow24hr','snow48hr', 'snow72hr', 'Wind'],
-                    'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint'],
+                    'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust'],
                     'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust'],
                     'hrrr': ['Wind', 'precip6hr', 'snow6hr'],
                     'urma': ['Wind']}
 
 PROBABILISTIC_ELEMENTS = {
     'nbm': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr', 'maxt', 'mint'],
-    'nbmqmd': ['precip6hr','precip24hr'],
+    'nbmqmd': ['precip6hr','precip24hr', 'Wind', 'Gust','maxt', 'mint'],
     'nbm_exp': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr'],
     'nbmqmd_exp': ['precip6hr','precip24hr', 'Wind', 'Gust','maxt', 'mint'],
     'hrrr': [],
@@ -154,6 +156,7 @@ HERBIE_CYCLES = {"nbm": "6h","nbm_exp": "6h", "nbmqmd": "12h", "nbmqmd_exp": "12
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
                                   'nbm_exp': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
                                   'nbmqmd_exp': [':WIND:10 m above'],
+                                  'nbmqmd': [':WIND:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
                                    'urma': []},
                         'precip24hr': {'nbmqmd': [':APCP:surface:'],
@@ -174,7 +177,8 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
                                  'nbmqmd_exp': [':TMP:2 m above ground:']},
                         'mint': {'nbmqmd': [':TMP:2 m above ground:'],
                                  'nbmqmd_exp': [':TMP:2 m above ground:']},
-                        'Gust': {'nbmqmd_exp': [':GUST:10 m above']}
+                        'Gust': {'nbmqmd_exp': [':GUST:10 m above'],
+                                 'nbmqmd': [':GUST:10 m above']}
                         }
 
 QMD_CYCLES = {
@@ -249,6 +253,10 @@ HERBIE_RENAME_MAP = {
             "si10": "wind_speed_kt",
             "i10fg": "wind_gust_kt"
         },
+        "nbmqmd": {
+            "si10": "wind_speed_kt",
+            "i10fg": "wind_gust_kt"
+        },
         "urma": {
             "wdir10": "wind_dir_deg",
             "si10": "wind_speed_kt",
@@ -262,6 +270,9 @@ HERBIE_RENAME_MAP = {
     },
     "Gust": {
         "nbmqmd_exp": {
+            "i10fg": "wind_gust_kt"
+        },
+        "nbmqmd": {
             "i10fg": "wind_gust_kt"
         }
     },
@@ -352,6 +363,10 @@ HERBIE_UNIT_CONVERSIONS = {
             "wind_speed_kt": 1.94384,
             "wind_gust_kt": 1.94384
         },
+        "nbmqmd": {
+            "wind_speed_kt": 1.94384,
+            "wind_gust_kt": 1.94384
+        },
         "urma": {
             "wind_speed_kt": 1.94384,
             "wind_gust_kt": 1.94384
@@ -360,12 +375,13 @@ HERBIE_UNIT_CONVERSIONS = {
             "u_wind": 1.94384,
             "v_wind": 1.94384,
             "wind_gust_kt": 1.9484
-        },
-        "nbmqmd_exp":  {"wind_speed_kt": 1.94384
         }
     },
     "Gust": {
         "nbmqmd_exp": {
+            "wind_gust_kt": 1.9484
+        },
+        "nbmqmd": {
             "wind_gust_kt": 1.9484
         }
     },

@@ -21,3 +21,7 @@ obs_stations_active.txt
 streamlit*
 app_config.yaml
 settings.json
+maxt*
+mint*
+Gust_obs*
+ndfd/

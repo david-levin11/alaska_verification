@@ -22,9 +22,7 @@ set -Eeuo pipefail
 
 declare -A AVAILABLE_FIELDS=(
   [nbm]="Wind snow6hr snow24hr snow48hr snow72hr"
-  [nbm_exp]="snow6hr snow24hr snow48hr snow72hr"
-  [nbmqmd]="precip24hr precip6hr maxt mint"
-  [nbmqmd_exp]="precip24hr precip6hr maxt mint Wind Gust"
+  [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust"
   [hrrr]="Wind precip6hr snow6hr"
   [urma]="Wind"
 )
