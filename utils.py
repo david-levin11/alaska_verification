@@ -166,12 +166,18 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     elif element_type == "snow6hr":
         filtered_files = {"snow": []}
         components = ["snow"]
+    elif element_type == "rh":
+        filtered_files = {"rh": []}
+        components = ["rh"]
 
     for component in components:
         prefixes = element_dict[element_type][component]
         for tdate in date_range:
             for prefix in prefixes:
-                pattern = f"{base_s3}/{component}/{tdate:%Y}/{tdate:%m}/{tdate:%d}/{prefix}_*"
+                if element_type != "rh":
+                    pattern = f"{base_s3}/{component}/{tdate:%Y}/{tdate:%m}/{tdate:%d}/{prefix}_*"
+                else:
+                    pattern = f"{base_s3}/{component}m/{tdate:%Y}/{tdate:%m}/{tdate:%d}/{prefix}_*"
                 try:
                     matched_files = fs.glob(pattern)
                     for file in matched_files:
@@ -245,6 +251,8 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                     record["mint"] = round(float(K_to_F(spd)), 2)
                 elif config.ELEMENT == "snow6hr":
                     record["snow6hr"] = round(float(M_to_IN(spd)), 1)
+                elif config.ELEMENT == "rh":
+                    record["rh"] = round(float(spd), 1)
                 else:
                     record[spd_key] = float(spd)
 

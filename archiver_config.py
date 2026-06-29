@@ -500,6 +500,9 @@ NDFD_DICT = {"Wind":
                  },
             "snow6hr": 
                 {"snow": ["YSRZ98"]
+                 },
+            "rh": 
+                {"rh": ["YRRZ98", "YRRZ97"]
                  }
             }
 
@@ -518,7 +521,8 @@ NDFD_FILE_STRINGS = {"Wind":["wspd", "wdir"],
                     "precip6hr": ["qpf"],
                     "maxt": ["maxt"],
                     "mint": ["mint"],
-                    "snow6hr": ["snow"]
+                    "snow6hr": ["snow"],
+                    "rh": ["rh"]
                     }
 
 NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"],
@@ -526,7 +530,8 @@ NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"],
                         "precip6hr": ["unknown"],
                         "maxt": ["tmax"],
                         "mint": ["tmin"],
-                        "snow6hr": ["unknown"]
+                        "snow6hr": ["unknown"],
+                        "rh": ["r2"]
                     }
 
 ##################### AWS Params #################################

@@ -78,6 +78,9 @@ class NDFDArchiver(Archiver):
         elif self.config.ELEMENT == "snow6hr":
             speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
             dir_key = None
+        elif self.config.ELEMENT == "rh":
+            speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
+            dir_key = None
         else:
             print(f"process_files is not set up yet for {self.config.ELEMENT}.  Add to ndfd_archiver.py and archiver_config")
             sys.exit()
