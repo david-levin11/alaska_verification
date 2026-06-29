@@ -45,7 +45,8 @@ OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
             "snow48hr": ["precip_intervals", "precip_accum"],
             "snow72hr": ["precip_intervals", "precip_accum"],
             "maxt": ["air_temp"],
-            "mint": ['air_temp']}
+            "mint": ['air_temp'],
+            "rh": ['relative_humidity']}
 # Need to set this up for precip24hr and maxt mint
 OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"],
                   "precip24hr": ["precip_24h"],
@@ -100,6 +101,9 @@ HERBIE_FORECASTS = {
             'snow48hr': [53,59,65,71,83,89,95,101,107,113,119,125,131,137,143,149,155,161],
             'snow72hr': [83,89,95,101,107,113,119,125,131,137,143,149,155,161],
             'snow6hr': [11,17,23,29,35,41,47,53,59,65,71,83,89,95,101,107,113,119,125,131,137,143,149,155,161],
+            'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'rh': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
         },
         'nbm_exp': {
             'snow24hr': [29,35,41,47,53,59,65,71,83,89,95,101,107,113,119,125,131,137,143,149,155,161],
@@ -113,6 +117,7 @@ HERBIE_FORECASTS = {
             'precip6hr': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
             'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
             'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'rh': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
             'Wind': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
             'Gust': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168]
         },
@@ -121,11 +126,13 @@ HERBIE_FORECASTS = {
             'precip6hr': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
             'maxt': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
             'mint': [18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138, 150, 162, 174],
+            'rh': [6,12,18,24,30,36,42,48,54,60,66,72,78,84,90,96,102,108,114,120],
             'Wind': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
             'Gust': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
         },
 		'hrrr':{
             'Wind': [12,18,24,30,36,42,48],
+            'rh': [12,18,24,30,36,42,48],
             'precip6hr': [0,6,12,18,24,30,36,42,48],
             'snow6hr': [0,6,12,18,24,30,36,42,48]
         },
@@ -135,16 +142,16 @@ HERBIE_FORECASTS = {
 		}
 
 
-AVAILABLE_FIELDS = {'nbm': ['Wind','snow6hr', 'snow24hr', 'snow48hr', 'snow72hr'],
+AVAILABLE_FIELDS = {'nbm': ['Wind','snow6hr', 'snow24hr', 'snow48hr', 'snow72hr', 'mint', 'maxt', 'rh'],
                     'nbm_exp': ['snow6hr', 'snow24hr','snow48hr', 'snow72hr', 'Wind'],
-                    'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust'],
+                    'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust', 'rh'],
                     'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust'],
-                    'hrrr': ['Wind', 'precip6hr', 'snow6hr'],
+                    'hrrr': ['Wind', 'precip6hr', 'snow6hr', 'rh'],
                     'urma': ['Wind']}
 
 PROBABILISTIC_ELEMENTS = {
-    'nbm': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr', 'maxt', 'mint'],
-    'nbmqmd': ['precip6hr','precip24hr', 'Wind', 'Gust','maxt', 'mint'],
+    'nbm': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr', 'maxt', 'mint', 'rh'],
+    'nbmqmd': ['precip6hr','precip24hr', 'Wind', 'Gust', 'maxt', 'mint', 'rh'],
     'nbm_exp': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr'],
     'nbmqmd_exp': ['precip6hr','precip24hr', 'Wind', 'Gust','maxt', 'mint'],
     'hrrr': [],
@@ -177,6 +184,9 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
                                  'nbmqmd_exp': [':TMP:2 m above ground:']},
                         'mint': {'nbmqmd': [':TMP:2 m above ground:'],
                                  'nbmqmd_exp': [':TMP:2 m above ground:']},
+                        'rh': {'nbmqmd': [':RH:2 m above ground:'],
+                                 'nbmqmd_exp': [':RH:2 m above ground:'],
+                                 'hrrr': [':RH:2 m above ground:']},
                         'Gust': {'nbmqmd_exp': [':GUST:10 m above'],
                                  'nbmqmd': [':GUST:10 m above']}
                         }
@@ -213,6 +223,10 @@ QMD_CYCLES = {
     'mint': {
         'nbmqmd': 18,
         'nbmqmd_exp': 18
+    },
+    'rh': {
+        'nbmqmd': 6,
+        'nbmqmd_exp': 6
     }
 }
 
@@ -225,7 +239,8 @@ HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m
                            'snow48hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface']},
                            'snow72hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface']},
                            'maxt': {'nbmqmd': [':TMP:2 m above ground:']},
-                           'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
+                           'mint': {'nbmqmd': [':TMP:2 m above ground:']},
+                           'rh': {'nbmqmd': [':RH:2 m above ground:']}}
 
 HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'nbm_exp': ['ens std dev'], 'hrrr': ['ens std dev']},
                           'precip24hr': {'nbmqmd': ['ens std dev']},
@@ -235,6 +250,7 @@ HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'nbm_exp': ['ens std 
                           'snow48hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'snow72hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'maxt': {'nbmqmd': ['ens std dev']},
+                          'rh': {'nbmqmd': ['ens std dev']},
                           'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
 HERBIE_RENAME_MAP = {
@@ -346,6 +362,17 @@ HERBIE_RENAME_MAP = {
             "t2m": "min_temp"
         }
     
+    },
+    "rh": {
+        "nbmqmd": {
+            "rh": "rh"
+        },
+        "nbmqmd_exp": {
+            "rh": "rh"
+        },
+        "hrrr": {
+            "rh": "rh"
+        }
     }
 }
 
@@ -435,6 +462,15 @@ HERBIE_UNIT_CONVERSIONS = {
         "nbmqmd":  {"mint": 1.8
         },
         "nbmqmd_exp":  {"mint": 1.8
+        }
+    },
+    "rh": {
+        "nbmqmd":  {"rh": 1
+        },
+        "nbmqmd_exp":  {"rh": 1
+        },
+        "hrrr": {
+            "rh": 1
         }
     }
 }

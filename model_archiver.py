@@ -68,6 +68,7 @@ class ModelArchiver(Archiver):
         )
 
     def process_files(self, file_urls):
+        #print(self.config.HERBIE_XARRAY_STRINGS[self.config.ELEMENT])
         return extract_model_subset_parallel(
             file_urls=file_urls,
             station_df=self.station_df,

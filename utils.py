@@ -505,6 +505,9 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         elif element == "mint":
             tr_start = fcst_hour - 18
             accum_str = f"{tr_start}-{tr_end} hour min fcst"
+        elif element == "rh":
+            tr_start = fcst_hour - 6
+            accum_str = f"{tr_end} hour fcst"
         elif element == "Wind":
             tr_start = tr_end
             accum_str = f"{tr_end} hour fcst"
@@ -513,6 +516,8 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             accum_str = f"{tr_end} hour fcst"
         else:
             raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
+        print(f"Search string is: {search_strings}")
+        print(f"Accum string is: {accum_str}")
         # Target percentiles
         # With this:
         target_perc_values = {5, 10, 25, 50, 75, 90, 95}
@@ -1085,6 +1090,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
                             elif element == "mint":
                                 record[f"mint_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
+                            elif element == "rh":
+                                record[f"rh_p{perc}"] = round(float(values[iy, ix]), 2)
                             elif element == "Wind":
                                 record[f"wind_p{perc}"] = round(float(MS_to_KTS(values[iy, ix])), 2)
                             elif element == "Gust":
