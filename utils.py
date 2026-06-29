@@ -1026,6 +1026,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 val = M_to_IN(ds[grib_var].values[iy, ix])
                                 record[renamed_var] = round(float(val), 1)
 
+                            all_records.append(record)
+                        elif element == 'rh':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = ds[grib_var].values[iy, ix]
+                                record[renamed_var] = round(float(val), 1)
+
                             all_records.append(record)       
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")

@@ -240,7 +240,7 @@ HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m
                            'snow72hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface']},
                            'maxt': {'nbmqmd': [':TMP:2 m above ground:']},
                            'mint': {'nbmqmd': [':TMP:2 m above ground:']},
-                           'rh': {'nbmqmd': [':RH:2 m above ground:']}}
+                           'rh': {'nbmqmd': [':RH:2 m above ground:'], 'hrrr': [':RH:2 m above ground:']}}
 
 HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'nbm_exp': ['ens std dev'], 'hrrr': ['ens std dev']},
                           'precip24hr': {'nbmqmd': ['ens std dev']},
@@ -250,7 +250,7 @@ HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'nbm_exp': ['ens std 
                           'snow48hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'snow72hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'maxt': {'nbmqmd': ['ens std dev']},
-                          'rh': {'nbmqmd': ['ens std dev']},
+                          'rh': {'nbmqmd': ['ens std dev'],'hrrr': ['ens std dev']},
                           'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
 HERBIE_RENAME_MAP = {
@@ -371,7 +371,7 @@ HERBIE_RENAME_MAP = {
             "rh": "rh"
         },
         "hrrr": {
-            "rh": "rh"
+            "r2": "rh"
         }
     }
 }
