@@ -39,7 +39,7 @@ def run_monthly_archiving(start, end, element, use_local):
         filtered_files = archiver.fetch_file_list(current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
         #print(filtered_files)
         #sys.exit(1)
-        print(f"NDFD file strings are {[k for k in config.NDFD_FILE_STRINGS]}")
+        #print(f"NDFD file strings are {[k for k in config.NDFD_FILE_STRINGS]}")
         file_key = config.NDFD_FILE_STRINGS[element][0]
         #print(f"File key is {file_key}")
         #print(f"Filteres files are: {filtered_files}")

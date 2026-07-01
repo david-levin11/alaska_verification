@@ -52,13 +52,17 @@ OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gus
                   "precip24hr": ["precip_24h"],
                   "precip6hr": ["precip_6h"],
                   "maxt": ["max_t"],
-                  "mint": ["min_t"]}
+                  "mint": ["min_t"],
+                  "rh": ["relative_humidity_set_1"]}
 
 OBS_RENAME_MAP = {
     "Wind": {
         "wind_speed_set_1": "obs_wind_speed_kts",
         "wind_direction_set_1": "obs_wind_dir_deg",
         "wind_gust_set_1": "obs_wind_gust_kts"
+    },
+    "rh": {
+        "relative_humidity_set_1": "rh"
     }
 }
 

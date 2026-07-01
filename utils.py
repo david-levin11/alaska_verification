@@ -524,8 +524,8 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             accum_str = f"{tr_end} hour fcst"
         else:
             raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
-        print(f"Search string is: {search_strings}")
-        print(f"Accum string is: {accum_str}")
+        #print(f"Search string is: {search_strings}")
+        #print(f"Accum string is: {accum_str}")
         # Target percentiles
         # With this:
         target_perc_values = {5, 10, 25, 50, 75, 90, 95}

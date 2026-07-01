@@ -67,8 +67,8 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
             print("⚠️ No files found for this chunk.")
         else:
             df = archiver.process_files(file_urls)
-            print(f'Dataframe is: {df.head(10)}')
-            df.to_csv('test.csv')
+            #print(f'Dataframe is: {df.head(10)}')
+            #df.to_csv('test.csv')
             if df.empty:
                 print("⚠️ No data extracted for this chunk.")
             else:

@@ -221,10 +221,11 @@ class ObsArchiver(Archiver):
                         "output": "json",
                         "hfmetars": self.hfmetar,
                     }
+                    
                     r = requests.get(self.url, params=params, timeout=60)
                     r.raise_for_status()
                     js = r.json()
-
+                    
                     # --- flatten minimal time series
                     rows = []
                     for st in js.get("STATION", []):
@@ -433,33 +434,36 @@ class ObsArchiver(Archiver):
             #    print(f"Now processing these stations: {chunk}")
             attempt = 0
             wait = self.initial_wait
-            while attempt < self.max_retries:
-                try:
-                    params = {
-                        "stid": ",".join(chunk),
-                        "start": start_time,
-                        "end": end_time,
-                        "vars": ",".join(self.obs_fields),
-                        "hfmetars": self.hfmetar,
-                        "units": "english",
-                        "token": self.api_token,
-                        "obtimezone": "utc",
-                        "output": "json"
-                    }
-                    r = requests.get(self.url, params=params)
-                    r.raise_for_status()
-                    obs_json = r.json()
-                    df = self.process_obs_data(obs_json["STATION"])
-                    if isinstance(df, pd.DataFrame):
-                        all_obs.append(df)
-                    else:
-                        print(f"⚠️ Unexpected return type from process_obs_data: {type(df)}")
-                    break
-                except Exception as e:
-                    print(f"Retry {attempt+1}/{self.max_retries} failed: {e}")
-                    attempt += 1
-                    sleep(wait)
-                    wait *= 2
+            #while attempt < self.max_retries:
+            #    try:
+            params = {
+                "stid": ",".join(chunk),
+                "start": start_time,
+                "end": end_time,
+                "vars": ",".join(self.obs_fields),
+                "hfmetars": self.hfmetar,
+                "units": "english",
+                "token": self.api_token,
+                "obtimezone": "utc",
+                "output": "json"
+            }
+            #print(f"URL is : {self.url}")
+            #print(f"Params are {params}")
+            r = requests.get(self.url, params=params)
+            r.raise_for_status()
+            obs_json = r.json()
+            #print(obs_json)
+            df = self.process_obs_data(obs_json["STATION"])
+            if isinstance(df, pd.DataFrame):
+                all_obs.append(df)
+            else:
+                print(f"⚠️ Unexpected return type from process_obs_data: {type(df)}")
+            break
+                # except Exception as e:
+                #     print(f"Retry {attempt+1}/{self.max_retries} failed: {e}")
+                #     attempt += 1
+                #     sleep(wait)
+                #     wait *= 2
         return pd.concat(all_obs, ignore_index=True)
 
     def process_obs_data(self, raw_obs_json):
@@ -525,6 +529,8 @@ if __name__ == "__main__":
     elif config.ELEMENT == "precip6hr":
         df_obs = obs_archiver.fetch_precip_rolling(stations, config.OBS_START, config.OBS_END, accum_hours=6, step_hours=6)
     elif config.ELEMENT == "Wind":
+        df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
+    elif config.ELEMENT == "rh":
         df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
     elif config.ELEMENT == "maxt":
         df_obs = obs_archiver.fetch_tmax_12to06_timeseries(
