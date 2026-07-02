@@ -22,16 +22,16 @@ set -Eeuo pipefail
 
 declare -A AVAILABLE_FIELDS=(
   [nbm]="Wind snow6hr snow24hr snow48hr snow72hr"
-  [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust"
-  [hrrr]="Wind precip6hr snow6hr"
+  [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust rh"
+  [hrrr]="Wind rh precip6hr snow6hr"
   [urma]="Wind"
 )
 
 # NDFD elements (keys of your NDFD_DICT)
-DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "precip6hr" "maxt" "mint" "snow6hr")
+DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "precip6hr" "maxt" "mint" "snow6hr")
 
 # OBS elements
-DEFAULT_OBS_ELEMENTS=("Wind" "precip24hr" "precip6hr" "maxt" "mint")
+DEFAULT_OBS_ELEMENTS=("Wind" "rh" "precip24hr" "precip6hr" "maxt" "mint")
 
 ts() { date -u +"%Y-%m-%d %H:%M:%S UTC"; }
 log_info()  { echo "[$(ts)] [INFO ] $*"; }

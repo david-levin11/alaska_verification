@@ -434,36 +434,36 @@ class ObsArchiver(Archiver):
             #    print(f"Now processing these stations: {chunk}")
             attempt = 0
             wait = self.initial_wait
-            #while attempt < self.max_retries:
-            #    try:
-            params = {
-                "stid": ",".join(chunk),
-                "start": start_time,
-                "end": end_time,
-                "vars": ",".join(self.obs_fields),
-                "hfmetars": self.hfmetar,
-                "units": "english",
-                "token": self.api_token,
-                "obtimezone": "utc",
-                "output": "json"
-            }
-            #print(f"URL is : {self.url}")
-            #print(f"Params are {params}")
-            r = requests.get(self.url, params=params)
-            r.raise_for_status()
-            obs_json = r.json()
-            #print(obs_json)
-            df = self.process_obs_data(obs_json["STATION"])
-            if isinstance(df, pd.DataFrame):
-                all_obs.append(df)
-            else:
-                print(f"⚠️ Unexpected return type from process_obs_data: {type(df)}")
-            break
-                # except Exception as e:
-                #     print(f"Retry {attempt+1}/{self.max_retries} failed: {e}")
-                #     attempt += 1
-                #     sleep(wait)
-                #     wait *= 2
+            while attempt < self.max_retries:
+                try:
+                    params = {
+                        "stid": ",".join(chunk),
+                        "start": start_time,
+                        "end": end_time,
+                        "vars": ",".join(self.obs_fields),
+                        "hfmetars": self.hfmetar,
+                        "units": "english",
+                        "token": self.api_token,
+                        "obtimezone": "utc",
+                        "output": "json"
+                    }
+                    #print(f"URL is : {self.url}")
+                    #print(f"Params are {params}")
+                    r = requests.get(self.url, params=params)
+                    r.raise_for_status()
+                    obs_json = r.json()
+                    #print(obs_json)
+                    df = self.process_obs_data(obs_json["STATION"])
+                    if isinstance(df, pd.DataFrame):
+                        all_obs.append(df)
+                    else:
+                        print(f"⚠️ Unexpected return type from process_obs_data: {type(df)}")
+                    break
+                except Exception as e:
+                    print(f"Retry {attempt+1}/{self.max_retries} failed: {e}")
+                    attempt += 1
+                    sleep(wait)
+                    wait *= 2
         return pd.concat(all_obs, ignore_index=True)
 
     def process_obs_data(self, raw_obs_json):
