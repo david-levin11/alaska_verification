@@ -166,12 +166,18 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     elif element_type == "snow6hr":
         filtered_files = {"snow": []}
         components = ["snow"]
+    elif element_type == "rh":
+        filtered_files = {"rh": []}
+        components = ["rh"]
 
     for component in components:
         prefixes = element_dict[element_type][component]
         for tdate in date_range:
             for prefix in prefixes:
-                pattern = f"{base_s3}/{component}/{tdate:%Y}/{tdate:%m}/{tdate:%d}/{prefix}_*"
+                if element_type != "rh":
+                    pattern = f"{base_s3}/{component}/{tdate:%Y}/{tdate:%m}/{tdate:%d}/{prefix}_*"
+                else:
+                    pattern = f"{base_s3}/{component}m/{tdate:%Y}/{tdate:%m}/{tdate:%d}/{prefix}_*"
                 try:
                     matched_files = fs.glob(pattern)
                     for file in matched_files:
@@ -245,6 +251,8 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                     record["mint"] = round(float(K_to_F(spd)), 2)
                 elif config.ELEMENT == "snow6hr":
                     record["snow6hr"] = round(float(M_to_IN(spd)), 1)
+                elif config.ELEMENT == "rh":
+                    record["rh"] = round(float(spd), 1)
                 else:
                     record[spd_key] = float(spd)
 
@@ -505,6 +513,9 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         elif element == "mint":
             tr_start = fcst_hour - 18
             accum_str = f"{tr_start}-{tr_end} hour min fcst"
+        elif element == "rh":
+            tr_start = fcst_hour - 6
+            accum_str = f"{tr_end} hour fcst"
         elif element == "Wind":
             tr_start = tr_end
             accum_str = f"{tr_end} hour fcst"
@@ -513,6 +524,8 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             accum_str = f"{tr_end} hour fcst"
         else:
             raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
+        #print(f"Search string is: {search_strings}")
+        #print(f"Accum string is: {accum_str}")
         # Target percentiles
         # With this:
         target_perc_values = {5, 10, 25, 50, 75, 90, 95}
@@ -1021,6 +1034,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 val = M_to_IN(ds[grib_var].values[iy, ix])
                                 record[renamed_var] = round(float(val), 1)
 
+                            all_records.append(record)
+                        elif element == 'rh':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = ds[grib_var].values[iy, ix]
+                                record[renamed_var] = round(float(val), 1)
+
                             all_records.append(record)       
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
@@ -1085,6 +1106,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
                             elif element == "mint":
                                 record[f"mint_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
+                            elif element == "rh":
+                                record[f"rh_p{perc}"] = round(float(values[iy, ix]), 2)
                             elif element == "Wind":
                                 record[f"wind_p{perc}"] = round(float(MS_to_KTS(values[iy, ix])), 2)
                             elif element == "Gust":
