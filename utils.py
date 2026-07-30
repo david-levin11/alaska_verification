@@ -963,6 +963,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
 
                 for _, row in station_df.iterrows():
                     stid = row["stid"]
+                    #if stid == "ERXA2":
+                    #    print(f"Found {stid}")
                     lat, lon = row["latitude"], row["longitude"]
 
                     if stid in station_index_cache:
@@ -1082,6 +1084,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                     # Process all stations
                     for _, row in station_df.iterrows():
                         stid = row["stid"]
+                        #if stid == "ERXA2":
+                        #    print(f"Found it! {stid}")
                         lat, lon = row["latitude"], row["longitude"]
 
                         if stid in station_index_cache:
@@ -1096,7 +1100,8 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             "valid_time": valid_time,
                             "forecast_hour": forecast_hour,
                         }
-
+                        #if stid == "ERXA2":
+                        #    print(f"Record is {record}")
                         for perc, values in grib_fields.items():
                             if element == "precip24hr":
                                 record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
@@ -1119,7 +1124,6 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                     f"Unit conversions not set up for {element} in {model}. "
                                     f"Check HERBIE_UNIT_CONVERSIONS in archiver_config.py"
                                 )
-
                         all_records.append(record)
 
                 else:
@@ -1136,6 +1140,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
 
     shutil.rmtree(temp_download_dir)
     df = pd.DataFrame.from_records(all_records)
+    #print(df[df["station_id"]=="ERXA2"])
     # logic for creating accum intervals from total precip for models that output only tp
     if model == "hrrr" and element == "precip6hr":
         # Pick the cumulative column name produced by your rename_map
