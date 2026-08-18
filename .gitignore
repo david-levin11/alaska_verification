@@ -16,6 +16,8 @@ Wind*
 test*
 obs_metadata*
 oryx*
+*.csv
+*.parquet
 download_nbm_yearly.py
 obs_stations_active.txt
 streamlit*
