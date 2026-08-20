@@ -3,6 +3,7 @@ import tempfile
 from model_archiver import ModelArchiver
 import archiver_config as config
 import pandas as pd
+from pathlib import Path
 from dateutil.relativedelta import relativedelta
 import shutil
 import os
@@ -42,9 +43,14 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     else:
         config.USE_CLOUD_STORAGE = True
 
-    config.MODEL = model_name
+    config.MODEL = model
     config.ELEMENT = element
-    archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M")) 
+
+    archiver = ModelArchiver(
+        config,
+        start=start.strftime("%Y%m%d%H%M"),
+        wxelement=element,
+    )
     current = start
     while current <= end:
         if model in ['nbmqmd', 'nbmqmd_exp']:
@@ -82,7 +88,18 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
                         element.lower(),
                         f"{current.year}_{current.month:02d}_archive.parquet"
                     )
-                    archiver.write_local_output(df, local_path)
+                    dedup_columns = [
+                        "station_id",
+                        "init_time",
+                        "valid_time",
+                        "forecast_hour",
+                    ]
+
+                    archiver.write_local_output(
+                        df,
+                        local_path,
+                        dedup_columns=dedup_columns,
+                    )
 
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)

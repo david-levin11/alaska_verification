@@ -127,15 +127,104 @@ def create_precip_metadata(url, token, state, networks):
     else:
         raise Exception(f"Failed to fetch metadata: {response.status_code}")
 
+def create_all_station_metadata(
+    url,
+    token,
+    state,
+    status="active",
+    networks=None,
+):
+    """
+    Fetch metadata for all active Synoptic stations in a state, regardless
+    of whether they report a particular weather variable.
+
+    Parameters
+    ----------
+    url : str
+        Synoptic metadata endpoint.
+    token : str
+        Synoptic API token.
+    state : str
+        State abbreviation, e.g. "ak".
+    status : str
+        Station status. Default is "active".
+    networks : str or None
+        Optional comma-separated Synoptic network list. If None, do not
+        restrict by network.
+
+    Returns
+    -------
+    dict
+        Synoptic metadata JSON response.
+    """
+
+    params = {
+        "token": token,
+        "state": state,
+        "status": status,
+        "output": "json",
+    }
+
+    if networks:
+        params["network"] = networks
+
+    response = requests.get(url, params=params, timeout=30)
+
+    if response.status_code == 200:
+        return response.json()
+
+    raise Exception(
+        f"Failed to fetch all-station metadata: "
+        f"{response.status_code} {response.text[:500]}"
+    )
+
 def parse_metadata(data):
-    stn_dict = {"stid": [], "name": [], "latitude": [], "longitude": [], "elevation": []}
-    for stn in data["STATION"]:
-        stn_dict['stid'].append(stn['STID'])
-        stn_dict['name'].append(stn['NAME'])
-        stn_dict['latitude'].append(stn['LATITUDE'])
-        stn_dict['longitude'].append(stn['LONGITUDE'])
-        stn_dict['elevation'].append(stn['ELEVATION'])
-    return pd.DataFrame(stn_dict)
+    """
+    Parse Synoptic metadata JSON into a station dataframe.
+
+    Keeps the expected stid/name/lat/lon/elevation fields but is tolerant
+    of missing optional metadata.
+    """
+
+    stations = data.get("STATION", [])
+
+    records = []
+
+    for stn in stations:
+        stid = stn.get("STID")
+        lat = stn.get("LATITUDE")
+        lon = stn.get("LONGITUDE")
+
+        if stid is None or lat is None or lon is None:
+            continue
+
+        records.append(
+            {
+                "stid": str(stid).strip(),
+                "name": stn.get("NAME"),
+                "latitude": lat,
+                "longitude": lon,
+                "elevation": stn.get("ELEVATION"),
+                "status": stn.get("STATUS"),
+                "mnet_id": stn.get("MNET_ID"),
+                "network": stn.get("MNET_SHORTNAME"),
+                "timezone": stn.get("TIMEZONE"),
+            }
+        )
+
+    df = pd.DataFrame.from_records(records)
+
+    if df.empty:
+        return df
+
+    df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
+    df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
+    df["elevation"] = pd.to_numeric(df["elevation"], errors="coerce")
+
+    df = df.dropna(subset=["stid", "latitude", "longitude"])
+    df = df.drop_duplicates(subset=["stid"])
+
+    return df
 
 def extract_timestamp(filename):
     time_str = os.path.basename(filename).split("_")[-1]
