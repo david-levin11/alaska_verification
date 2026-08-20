@@ -3,6 +3,7 @@ import tempfile
 from model_archiver import ModelArchiver
 import archiver_config as config
 import pandas as pd
+from pathlib import Path
 from dateutil.relativedelta import relativedelta
 import shutil
 import os
