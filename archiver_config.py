@@ -79,7 +79,7 @@ MAX_RETRIES = 5
 ################### Model Params ###################################
 MODEL = 'nbm'
 
-HERBIE_MODELS = ['hrrr','nbm','nbm_exp','nbmqmd','nbmqmd_exp','urma','rtma','gfs']
+HERBIE_MODELS = ['hrrr','nbm','nbm_exp','nbmqmd','nbmqmd_exp','urma','rtma','gfs','rrfs']
 
 HERBIE_PRODUCTS = {'nbm':'ak',
             'nbm_exp': 'ak',
@@ -88,7 +88,8 @@ HERBIE_PRODUCTS = {'nbm':'ak',
 			'gfs':'pgrb2.0p25',
 			'hrrr':'sfc',
 			'rtma_ak':'ges',
-			'urma_ak':'ges'
+			'urma_ak':'ges',
+            'rrfs':'sfc',
 			}
 
 NBM_START_HOURS = {
@@ -135,10 +136,16 @@ HERBIE_FORECASTS = {
             'Gust': [12,18,24,30,36,42,48,54,60,66,72,84,96,108,120,132,144,156,168],
         },
 		'hrrr':{
-            'Wind': [12,18,24,30,36,42,48],
-            'rh': [12,18,24,30,36,42,48],
-            'precip6hr': [0,6,12,18,24,30,36,42,48],
-            'snow6hr': [0,6,12,18,24,30,36,42,48]
+            'Wind': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'rh': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'precip6hr': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'snow6hr': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+        },
+        'rrfs':{
+            'Wind': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'rh': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'precip6hr': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'snow6hr': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
         },
 		'urma':{
             'Wind':[0]
@@ -151,6 +158,7 @@ AVAILABLE_FIELDS = {'nbm': ['Wind','snow6hr', 'snow24hr', 'snow48hr', 'snow72hr'
                     'nbmqmd': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust', 'rh'],
                     'nbmqmd_exp': ['precip24hr', 'precip6hr', "maxt", 'mint', 'Wind', 'Gust'],
                     'hrrr': ['Wind', 'precip6hr', 'snow6hr', 'rh'],
+                    'rrfs': ['Wind', 'precip6hr', 'snow6hr', 'rh'],
                     'urma': ['Wind']}
 
 PROBABILISTIC_ELEMENTS = {
@@ -159,16 +167,18 @@ PROBABILISTIC_ELEMENTS = {
     'nbm_exp': ['snow6hr','snow24hr', 'snow48hr', 'snow72hr'],
     'nbmqmd_exp': ['precip6hr','precip24hr', 'Wind', 'Gust','maxt', 'mint'],
     'hrrr': [],
+    'rrfs': [],
     'urma': []
 }
 
-HERBIE_CYCLES = {"nbm": "6h","nbm_exp": "6h", "nbmqmd": "12h", "nbmqmd_exp": "12h", "hrrr": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
+HERBIE_CYCLES = {"nbm": "6h","nbm_exp": "6h", "nbmqmd": "12h", "nbmqmd_exp": "12h", "hrrr": "6h", "rrfs": "6h", "urma": "3h", "gfs": "6h", "rtma_ak": "3h"}
 
 HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
                                   'nbm_exp': [':WIND:10 m above', ':WDIR:10 m above', ':GUST:10 m above'],
                                   'nbmqmd_exp': [':WIND:10 m above'],
                                   'nbmqmd': [':WIND:10 m above'],
 								   'hrrr': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
+                                   'rrfs': [':UGRD:10 m above',':VGRD:10 m above',':GUST:surface'],
                                    'urma': []},
                         'precip24hr': {'nbmqmd': [':APCP:surface:'],
                                        'nbmqmd_exp': [':APCP:surface:']},
@@ -177,7 +187,8 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
                                       'hrrr': [':APCP:surface']},
                         'snow6hr': {'nbm': [':ASNOW:surface:'],
                                       'nbm_exp': [':ASNOW:surface:'],
-                                      'hrrr': [':ASNOW:surface']},
+                                      'hrrr': [':ASNOW:surface'],
+                                      'rrfs': [':ASNOW:surface']},
                         'snow24hr': {'nbm': [':ASNOW:surface:'],
                                       'nbm_exp': [':ASNOW:surface:']},
                         'snow48hr': {'nbm': [':ASNOW:surface:'],
@@ -190,7 +201,8 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
                                  'nbmqmd_exp': [':TMP:2 m above ground:']},
                         'rh': {'nbmqmd': [':RH:2 m above ground:'],
                                  'nbmqmd_exp': [':RH:2 m above ground:'],
-                                 'hrrr': [':RH:2 m above ground:']},
+                                 'hrrr': [':RH:2 m above ground:'],
+                                 'rrfs': [':RH:2 m above ground:']},
                         'Gust': {'nbmqmd_exp': [':GUST:10 m above'],
                                  'nbmqmd': [':GUST:10 m above']}
                         }
@@ -235,26 +247,26 @@ QMD_CYCLES = {
 }
 
 HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m above ground'],
-                                    'nbm_exp': ['10 m above ground']},
+                                    'nbm_exp': ['10 m above ground'],'rrfs': ['10 m above ground']},
                            'precip24hr': {'nbmqmd': ['APCP:surface']},
-                           'precip6hr': {'nbmqmd': ['APCP:surface'], 'hrrr': ['APCP:surface']},
-                           'snow6hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface'], 'hrrr': ['ASNOW:surface']},
+                           'precip6hr': {'nbmqmd': ['APCP:surface'], 'hrrr': ['APCP:surface'], 'rrfs': ['APCP:surface']},
+                           'snow6hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface'], 'hrrr': ['ASNOW:surface'], 'rrfs': ['ASNOW:surface']},
                            'snow24hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface']},
                            'snow48hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface']},
                            'snow72hr': {'nbm': ['ASNOW:surface'], 'nbm_exp': ['ASNOW:surface']},
                            'maxt': {'nbmqmd': [':TMP:2 m above ground:']},
                            'mint': {'nbmqmd': [':TMP:2 m above ground:']},
-                           'rh': {'nbmqmd': [':RH:2 m above ground:'], 'hrrr': [':RH:2 m above ground:']}}
+                           'rh': {'nbmqmd': [':RH:2 m above ground:'], 'hrrr': [':RH:2 m above ground:'],'rrfs': [':RH:2 m above ground:']}}
 
-HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'nbm_exp': ['ens std dev'], 'hrrr': ['ens std dev']},
+HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'nbm_exp': ['ens std dev'], 'hrrr': ['ens std dev'],'rrfs': ['ens std dev']},
                           'precip24hr': {'nbmqmd': ['ens std dev']},
                           'precip6hr': {'nbmqmd': ['ens std dev'], 'hrrr': ['ens std dev']},
-                          'snow6hr': {'nbm': ['prob'], 'nbm_exp': ['prob'], 'hrrr': ['ens std dev']},
+                          'snow6hr': {'nbm': ['prob'], 'nbm_exp': ['prob'], 'hrrr': ['ens std dev'],'rrfs': ['ens std dev']},
                           'snow24hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'snow48hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'snow72hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'maxt': {'nbmqmd': ['ens std dev']},
-                          'rh': {'nbmqmd': ['ens std dev'],'hrrr': ['ens std dev']},
+                          'rh': {'nbmqmd': ['ens std dev'],'hrrr': ['ens std dev'], 'rrfs': ['ens std dev']},
                           'mint': {'nbmqmd': [':TMP:2 m above ground:']}}
 
 HERBIE_RENAME_MAP = {
@@ -286,6 +298,11 @@ HERBIE_RENAME_MAP = {
             "u10": "u_wind",
             "v10": "v_wind",
             "gust": "wind_gust_kt"
+        },
+        "rrfs": {
+            "u10": "u_wind",
+            "v10": "v_wind",
+            "gust": "wind_gust_kt"
         }
     },
     "Gust": {
@@ -313,6 +330,9 @@ HERBIE_RENAME_MAP = {
         },
         "hrrr": {
             "tp": "precip_accum"
+        },
+        "rrfs": {
+            "tp": "precip_accum"
         }
     },
     "snow6hr": {
@@ -323,6 +343,9 @@ HERBIE_RENAME_MAP = {
             "unknown": "snow_accum_6hr"
         },
         "hrrr": {
+            "unknown": "snow_accum"
+        },
+        "rrfs": {
             "unknown": "snow_accum"
         }
     },
@@ -376,6 +399,9 @@ HERBIE_RENAME_MAP = {
         },
         "hrrr": {
             "r2": "rh"
+        },
+        "rrfs": {
+            "r2": "rh"
         }
     }
 }
@@ -406,6 +432,11 @@ HERBIE_UNIT_CONVERSIONS = {
             "u_wind": 1.94384,
             "v_wind": 1.94384,
             "wind_gust_kt": 1.9484
+        },
+        "rrfs": {
+            "u_wind": 1.94384,
+            "v_wind": 1.94384,
+            "wind_gust_kt": 1.9484
         }
     },
     "Gust": {
@@ -428,6 +459,8 @@ HERBIE_UNIT_CONVERSIONS = {
         "nbmqmd_exp":  {"precip6hr": 0.0393701
         },
         "hrrr":  {"precip6hr": 0.0393701
+        },
+        "rrfs":  {"precip6hr": 0.0393701
         }
     },
     "snow6hr": {
@@ -436,6 +469,8 @@ HERBIE_UNIT_CONVERSIONS = {
         "nbm_exp":  {"snow6hr": 39.3701
         },
         "hrrr":  {"snow6hr": 39.3701
+        },
+        "rrfs":  {"snow6hr": 39.3701
         }
     },
     "snow24hr": {
@@ -474,6 +509,9 @@ HERBIE_UNIT_CONVERSIONS = {
         "nbmqmd_exp":  {"rh": 1
         },
         "hrrr": {
+            "rh": 1
+        },
+        "rrfs": {
             "rh": 1
         }
     }
@@ -553,7 +591,8 @@ S3_URLS = {"ndfd": "s3://alaska-verification/ndfd/",
                 'hrrr': "s3://alaska-verification/hrrr/",
                 'urma': "s3://alaska-verification/urma/",
                 "nbmqmd": "s3://alaska-verification/nbmqmd/",
-                "nbmqmd_exp": "s3://alaska-verification/nbmqmd_exp/"
+                "nbmqmd_exp": "s3://alaska-verification/nbmqmd_exp/",
+                'rrfs': "s3://alaska-verification/rrfs/",
               }
 
 MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
@@ -561,7 +600,8 @@ MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
               'nbmqmd': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
               'nbmqmd_exp': "https://noaa-nbm-para-pds.s3.amazonaws.com",
                'hrrr':'https://noaa-hrrr-bdp-pds.s3.amazonaws.com',
-                 'urma': 'https://noaa-urma-pds.s3.amazonaws.com'
+                 'urma': 'https://noaa-urma-pds.s3.amazonaws.com',
+                 'rrfs': 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/v1.0'
                  }
 
 
