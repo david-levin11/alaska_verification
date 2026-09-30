@@ -574,7 +574,7 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
                         print(f"⚠️ Missing: {idx_url} — {r.status_code}")
                 except requests.exceptions.RequestException as e:
                     print(f"⚠️ Error accessing {idx_url}: {e}")
-    print(f"File urls are: {file_urls}")
+    #print(f"File urls are: {file_urls}")
     return file_urls
 
 

@@ -184,7 +184,8 @@ HERBIE_XARRAY_STRINGS = {'Wind': {'nbm': [':WIND:10 m above', ':WDIR:10 m above'
                                        'nbmqmd_exp': [':APCP:surface:']},
                         'precip6hr': {'nbmqmd': [':APCP:surface:'],
                                       'nbmqmd_exp': [':APCP:surface:'],
-                                      'hrrr': [':APCP:surface']},
+                                      'hrrr': [':APCP:surface'],
+                                      'rrfs': [':APCP:surface']},
                         'snow6hr': {'nbm': [':ASNOW:surface:'],
                                       'nbm_exp': [':ASNOW:surface:'],
                                       'hrrr': [':ASNOW:surface'],
@@ -260,7 +261,7 @@ HERBIE_REQUIRED_PHRASES = {'Wind': {'nbm': ['10 m above ground'], 'hrrr': ['10 m
 
 HERBIE_EXCLUDE_PHRASES = {'Wind': {'nbm': ['ens std dev'], 'nbm_exp': ['ens std dev'], 'hrrr': ['ens std dev'],'rrfs': ['ens std dev']},
                           'precip24hr': {'nbmqmd': ['ens std dev']},
-                          'precip6hr': {'nbmqmd': ['ens std dev'], 'hrrr': ['ens std dev']},
+                          'precip6hr': {'nbmqmd': ['ens std dev'], 'hrrr': ['ens std dev'],'rrfs': ['ens std dev']},
                           'snow6hr': {'nbm': ['prob'], 'nbm_exp': ['prob'], 'hrrr': ['ens std dev'],'rrfs': ['ens std dev']},
                           'snow24hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
                           'snow48hr': {'nbm': ['prob'], 'nbm_exp': ['prob']},
