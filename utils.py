@@ -1319,7 +1319,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     shutil.rmtree(temp_download_dir)
     df = pd.DataFrame.from_records(all_records)
     # logic for creating accum intervals from total precip for models that output only tp
-    if model == "hrrr" and element == "precip6hr":
+    if model in ["hrrr", "rrfs"] and element == "precip6hr":
         # Pick the cumulative column name produced by your rename_map
         candidates = ["precip_accum", "total_precip", "precip_total", "tp_total", "APCP_total"]
         total_col = next((c for c in candidates if c in df.columns), None)
@@ -1328,7 +1328,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                 df, total_col=total_col, out_col="precip_6h", hours=6,
                 group_cols=("station_id", "init_time")
             )
-    if model == "hrrr" and element == "snow6hr":
+    if model in ["hrrr", "rrfs"] and element == "snow6hr":
         # Pick the cumulative column name produced by your rename_map
         candidates = ["snow_accum", "total_snow", "snow_total", "tp_total", "ASNOW_total"]
         total_col = next((c for c in candidates if c in df.columns), None)
