@@ -25,6 +25,8 @@ declare -A AVAILABLE_FIELDS=(
   [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust rh"
   [hrrr]="Wind rh precip6hr snow6hr"
   [rrfs]="Wind rh precip6hr snow6hr"
+  [rrfs]="Wind rh precip6hr snow6hr"
+  [rrfsens]="Wind rh precip6hr snow6hr"
   [urma]="Wind"
 )
 

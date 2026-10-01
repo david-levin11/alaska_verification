@@ -25,7 +25,7 @@ WIND_OBS_FILE_COMPRESSED = f"alaska_{ELEMENT.lower()}_obs.parquet"
 
 
 ###################### Synoptic Params ##########################
-API_KEY = "c6c8a66a96094960aabf1fed7d07ccf0" # link to get an API key can be found at https://docs.google.com/document/d/1YuMUYog4J7DpFoEszMmFir4Ehqk9Q0GHG_QhSdrgV9M/edit?usp=sharing
+API_KEY = os.environ.get("SYNOPTIC_API_KEY", "")
 
 TIMESERIES_URL = "https://api.synopticdata.com/v2/stations/timeseries"
 # This will need to be changed after the new Synoptic statistics API is released.
@@ -609,3 +609,14 @@ MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
 #################### Processing Params ########################
 # for process pool operations
 MAX_WORKERS = 4
+
+# Source runs are archived once; six-hour lagging happens in ensemble_processing.
+RRFS_MEMBERS = ("m001", "m002", "m003", "m004", "m005")
+MODEL_URLS["rrfs"] = "https://noaa-rrfs-ops-pds.s3.amazonaws.com"
+MODEL_URLS["rrfsens"] = MODEL_URLS["rrfs"]
+HERBIE_MODELS.append("rrfsens")
+AVAILABLE_FIELDS["rrfsens"] = list(AVAILABLE_FIELDS["rrfs"])
+HERBIE_FORECASTS["rrfsens"] = {field: list(range(3, 61, 3))
+                               for field in AVAILABLE_FIELDS["rrfsens"]}
+HERBIE_CYCLES["rrfsens"] = "6h"
+S3_URLS["rrfsens"] = "s3://alaska-verification/rrfsens/"

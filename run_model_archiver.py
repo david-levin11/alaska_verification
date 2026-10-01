@@ -46,6 +46,13 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     config.MODEL = model
     config.ELEMENT = element
 
+    if start > end:
+        raise ValueError("start must not be after end")
+    if model in ["rrfs", "rrfsens", "hrrr"] and (
+        start.hour % 6 or start.minute or start.second or start.microsecond
+    ):
+        raise ValueError("Start must be a 00/06/12/18 UTC cycle")
+
     archiver = ModelArchiver(
         config,
         start=start.strftime("%Y%m%d%H%M"),
@@ -53,7 +60,10 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     )
     current = start
     while current <= end:
-        if model in ['nbmqmd', 'nbmqmd_exp']:
+        if model == 'rrfsens':
+            month_end = current.normalize() + pd.offsets.MonthBegin(1)
+            chunk_end = min(current + pd.Timedelta(days=1), month_end) - pd.Timedelta(minutes=1)
+        elif model in ['nbmqmd', 'nbmqmd_exp']:
             # Get the last day of the current month
             last_day = monthrange(current.year, current.month)[1]
             month_end = current.replace(day=last_day, hour=23, minute=59)
@@ -61,7 +71,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
             # Try to go 10 days ahead, but cap it at the end of the current month
             chunk_end = min(current + pd.Timedelta(days=10) - pd.Timedelta(minutes=1), month_end)
         else:
-            chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+            chunk_end = current.normalize() + pd.offsets.MonthBegin(1) - pd.Timedelta(minutes=1)
 
         if chunk_end > end:
             chunk_end = end
@@ -78,9 +88,12 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
             if df.empty:
                 print("⚠️ No data extracted for this chunk.")
             else:
+                dedup_columns = ["station_id", "init_time", "valid_time", "forecast_hour"]
+                if "member_id" in df.columns:
+                    dedup_columns.append("member_id")
                 if config.USE_CLOUD_STORAGE:
                     s3_path = f"{config.S3_URLS[config.MODEL]}{current.year}_{current.month:02d}_{model}_{element.lower()}_archive.parquet"
-                    archiver.write_to_s3(df, s3_path)
+                    archiver.write_to_s3(df, s3_path, dedup_columns=dedup_columns)
                 else:
                     local_path = os.path.join(
                         config.MODEL_DIR,
@@ -88,13 +101,6 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
                         element.lower(),
                         f"{current.year}_{current.month:02d}_archive.parquet"
                     )
-                    dedup_columns = [
-                        "station_id",
-                        "init_time",
-                        "valid_time",
-                        "forecast_hour",
-                    ]
-
                     archiver.write_local_output(
                         df,
                         local_path,
@@ -104,11 +110,9 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)
 
-        # Advance to the next chunk
-        if model in ['nbmqmd', 'nbmqmd_exp']:
-            current = chunk_end + pd.Timedelta(minutes=1)
-        else:
-            current += relativedelta(months=1)
+        # Keep cycle alignment across calendar month boundaries.
+        cycle = pd.Timedelta(config.HERBIE_CYCLES[model])
+        current = current + ((chunk_end - current) // cycle + 1) * cycle
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Model Archiver")

@@ -33,6 +33,8 @@ class ModelArchiver(Archiver):
         meta_path = Path(self.config.OBS) / metadata
 
         if not meta_path.exists():
+            if not self.config.API_KEY:
+                raise ValueError("Set SYNOPTIC_API_KEY before requesting station metadata")
             print(f"Creating all-active AK Synoptic metadata from {self.config.METADATA_URL}")
 
             meta_json = create_all_station_metadata(
@@ -86,6 +88,15 @@ class ModelArchiver(Archiver):
             print(f"  {stid}: {(station_ids == stid).any()}")
 
     def fetch_file_list(self, start, end):
+        if self.config.MODEL == "rrfsens":
+            return {member: get_model_file_list(
+                start=start, end=end,
+                fcst_hours=self.config.HERBIE_FORECASTS["rrfsens"][self.wxelement],
+                cycle=self.config.HERBIE_CYCLES["rrfsens"],
+                base_url=self.config.MODEL_URLS["rrfsens"],
+                element=self.wxelement, model="rrfs",
+                domain=self.config.HERBIE_DOMAIN, member_id=member,
+            ) for member in self.config.RRFS_MEMBERS}
         return get_model_file_list(
             start=start,
             end=end,
@@ -98,6 +109,21 @@ class ModelArchiver(Archiver):
         )
 
     def process_files(self, file_urls):
+        if self.config.MODEL == "rrfsens":
+            frames = []
+            for member, urls in file_urls.items():
+                if not urls:
+                    continue
+                # Reuse deterministic RRFS extraction; difference within each member.
+                frame = extract_model_subset_parallel(
+                    file_urls=urls, station_df=self.station_df,
+                    search_strings=self.config.HERBIE_XARRAY_STRINGS[self.wxelement]["rrfs"],
+                    element=self.wxelement, model="rrfs", config=self.config,
+                )
+                if not frame.empty:
+                    frame["member_id"] = member
+                    frames.append(frame)
+            return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
         #print(self.config.HERBIE_XARRAY_STRINGS[self.config.ELEMENT])
         return extract_model_subset_parallel(
             file_urls=file_urls,

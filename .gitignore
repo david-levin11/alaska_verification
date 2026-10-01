@@ -27,3 +27,7 @@ maxt*
 mint*
 Gust_obs*
 ndfd/
+
+# Keep automated regression tests despite the legacy test* exclusion.
+!tests/
+!tests/test_*.py
