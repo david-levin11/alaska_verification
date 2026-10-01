@@ -480,10 +480,16 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
     """
     if domain == "ak":
         full_domain = "alaska"
+        rrfs_res = "3km"
+        rrfs_lev = "2dfld"
     elif domain == "co":
         full_domain = "conus"
+        rrfs_res = "3km"
+        rrfs_lev = "2dfld"
     elif domain == "hi":
         full_domain = "hawaii"
+        rrfs_res = "2p5km"
+        rrfs_lev = "2dfld"
     #base_url = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
     init_times = pd.date_range(start=start, end=end, freq=cycle)
     if model == "nbm":
@@ -502,6 +508,8 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
     elif model == 'nbmqmd_exp':
         designator = "blend"
         suite = "qmd"
+    elif model == 'rrfs':
+        designator = 'rrfs'
     else:
         print(f"url formatting for {base_url} for {model} not implemented. Check file name on AWS such as 'blend.t12z.f024.ak.grib2'.")
         raise NotImplementedError
@@ -514,14 +522,30 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
         if model == 'urma':
             relative_path = f"{designator}.{init_date}/{designator}.t{int(init_hour):02d}z.2dvaranl_ndfd_3p0.grb2"
             full_url = f"{base_url}/{relative_path}"
+            idx_url = full_url + ".idx"
             try:
-                r = requests.head(full_url, timeout=5)
+                r = requests.head(idx_url, timeout=5)
                 if r.ok:
                     file_urls.append(full_url)
                 else:
-                    print(f"⚠️ Missing: {full_url} — {r.status_code}")
+                    print(f"⚠️ Missing: {idx_url} — {r.status_code}")
             except requests.exceptions.RequestException as e:
                 print(f"⚠️ Error accessing {idx_url}: {e}")
+        # rrfs has to come in through NOMADS for now
+        elif model == 'rrfs':
+            for fh in fcst_hours:
+                fxx = f"f{fh:03d}"
+                relative_path = f"{designator}.{init_date}/{init_hour}/{designator}.t{init_hour}z.{rrfs_lev}.{rrfs_res}.{fxx}.{domain}.grib2"
+                full_url = f"{base_url}/{relative_path}"
+                idx_url = full_url + ".idx"
+                try:
+                    r = requests.head(idx_url, timeout=5)
+                    if r.ok:
+                        file_urls.append(full_url)
+                    else:
+                        print(f"⚠️ Missing: {idx_url} — {r.status_code}")
+                except requests.exceptions.RequestException as e:
+                    print(f"⚠️ Error accessing {idx_url}: {e}")
         else:
             for fh in fcst_hours:
                 if model == 'nbm':
@@ -646,7 +670,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
             matched_ranges[byte_range] = line
 
-    if model in ["hrrr", "urma"] and element in ["precip6hr", "precip24hr", "snow6hr"]:
+    if model in ["hrrr", "urma", "rrfs"] and element in ["precip6hr", "precip24hr", "snow6hr"]:
         base = os.path.basename(remote_url)
         try:
             fcst_hour = parse_forecast_hour(base)
@@ -708,11 +732,11 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             byte_range = f'{rangestart}-{rangeend}' if rangeend else f'{rangestart}-'
             matched_ranges[byte_range] = line
 
-    if model in ["hrrr", "urma"] and element not in ["precip6hr", "precip24hr", "snow6hr"]:
+    if model in ["hrrr", "urma", "rrfs"] and element not in ["precip6hr", "precip24hr", "snow6hr"]:
         # Generic logic for other models: just match search strings
         exprs = {s: re.compile(re.escape(s)) for s in search_strings}
         matched_vars = set()
-
+        #print(f"Expression is {exprs}")
         for n, line in enumerate(lines, start=1):
             if exclude_phrases and any(phrase in line for phrase in exclude_phrases):
                 continue
@@ -832,7 +856,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
             if r.status_code in (200, 206):
                 f_out.write(r.content)
             else:
-                print(f"      ❌ Failed to download byte range {byteRange}")
+                print(f"      ❌ Failed to download byte range {byteRange} with status code {r.status_code}")
                 return None
 
     print(f'      ✅ Downloaded [{len(matched_ranges)}] fields from {os.path.basename(remote_url)} → {local_filename}')
@@ -850,10 +874,12 @@ def parse_date_and_time_from_url(remote_url, model):
         return url_parts[-4], url_parts[-3]
     elif model == 'hrrr':
         return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
+    elif model == 'rrfs':
+        return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     elif model == 'urma':
         return url_parts[-2].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     else:
-        raise ValueError(f"Unsupported date/time header parsing for model: {model}")
+        raise ValueError(f"Unsupported date/time header parsing for model: {model} with url parts {url_parts}")
 
 
 def add_interval_precip_from_total(
@@ -1002,6 +1028,16 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             },
                         decode_timedelta=True,
                     )
+                elif model == "rrfs":
+                    ds = xr.open_dataset(
+                        local_file,
+                        engine="cfgrib",
+                        backend_kwargs={
+                            "indexpath": "",
+                            "errors": "ignore"
+                            },
+                        decode_timedelta=True,
+                    )
                 elif model == "nbm_exp":
                     ds = xr.open_dataset(
                         local_file,
@@ -1039,6 +1075,12 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                 elif model == 'nbm_exp':
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
                 elif model == 'hrrr':
+                    match = re.search(r"f(\d{2,3})", os.path.basename(local_file))
+                    if match:
+                        forecast_hour = int(match.group(1))
+                    else:
+                        raise ValueError(f"Could not extract forecast hour from {local_file}")
+                elif model == 'rrfs':
                     match = re.search(r"f(\d{2,3})", os.path.basename(local_file))
                     if match:
                         forecast_hour = int(match.group(1))
@@ -1131,7 +1173,58 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 val = ds[grib_var].values[iy, ix]
                                 record[renamed_var] = round(float(val), 1)
 
-                            all_records.append(record)       
+                            all_records.append(record)
+                    elif model == 'rrfs':
+                        if element == "Wind":
+                            u = v = None  # Default to None in case either component is missing
+
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = ds[grib_var].values[iy, ix]
+                                factor = conversion_map.get(renamed_var, 1.0)
+                                val = val * factor if pd.notnull(val) else None
+
+                                if renamed_var == "u_wind":
+                                    u = val
+                                elif renamed_var == "v_wind":
+                                    v = val
+                                else:
+                                    if val is not None:
+                                        record[renamed_var] = round(float(val), 2)
+
+                            # If both u and v exist, compute speed and direction
+                            if u is not None and v is not None:
+                                speed = np.sqrt(u**2 + v**2)
+                                direction = (270 - np.degrees(np.arctan2(v, u))) % 360
+                                record["wind_dir_deg"] = round(float(direction), 0)
+                                record["wind_speed_kt"] = round(float(speed), 2)
+
+                            all_records.append(record)  
+                        elif element == 'precip6hr':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = MM_to_IN(ds[grib_var].values[iy, ix])
+                                record[renamed_var] = round(float(val), 2)
+
+                            all_records.append(record)   
+                        elif element == 'snow6hr':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = M_to_IN(ds[grib_var].values[iy, ix])
+                                record[renamed_var] = round(float(val), 1)
+
+                            all_records.append(record)
+                        elif element == 'rh':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                val = ds[grib_var].values[iy, ix]
+                                record[renamed_var] = round(float(val), 1)
+
+                            all_records.append(record)              
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
     # using pygrib to process nbmqmd files

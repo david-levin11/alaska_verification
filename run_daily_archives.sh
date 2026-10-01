@@ -24,6 +24,7 @@ declare -A AVAILABLE_FIELDS=(
   [nbm]="Wind snow6hr snow24hr snow48hr snow72hr"
   [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust rh"
   [hrrr]="Wind rh precip6hr snow6hr"
+  [rrfs]="Wind rh precip6hr snow6hr"
   [urma]="Wind"
 )
 
@@ -85,7 +86,7 @@ fi
 RC=0
 
 # -------------------------------
-# Main model→element loop (NBM/HRRR/URMA/NBMQMD*)
+# Main model→element loop (NBM/HRRR/RRFS/URMA/NBMQMD*)
 # -------------------------------
 for model in "${MODEL_LIST[@]}"; do
   if [[ -z "${AVAILABLE_FIELDS[$model]+set}" ]]; then
