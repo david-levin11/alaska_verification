@@ -1,5 +1,5 @@
 """Station-level REFS assembly and statistics, independent of GRIB/download code."""
-from pathlib import Path
+from refs_archive_io import read_source
 import numpy as np
 import pandas as pd
 
@@ -49,7 +49,7 @@ def _utc(value):
 
 
 def assemble_refs(archive_root, element, ensemble_init_time, valid_time, *,
-                  station_ids=None, max_forecast_hours=None):
+                  station_ids=None, max_forecast_hours=None, source_cache=None, aws_profile=None):
     """Read source-month Parquets and return a row for every expected member.
 
     archive_root is the directory containing hrrr/, rrfs/, and rrfsens/.
@@ -74,12 +74,13 @@ def assemble_refs(archive_root, element, ensemble_init_time, valid_time, *,
             if lead + lag <= limits[model]:
                 for member in members:
                     recipe.append((model, member, lag, cycle - pd.Timedelta(hours=lag)))
-    cache, selected = {}, []
+    cache = {} if source_cache is None else source_cache
+    selected = []
     stations = set(str(s) for s in station_ids) if station_ids is not None else set()
     for model, member, lag, source_init in recipe:
-        path = Path(archive_root) / model / element.lower() / f"{source_init:%Y_%m}_archive.parquet"
+        path = (str(archive_root), model, element.lower(), source_init.strftime("%Y_%m"), aws_profile)
         if path not in cache:
-            frame = pd.read_parquet(path) if path.exists() else pd.DataFrame()
+            frame = read_source(archive_root, model, element, source_init.strftime("%Y_%m"), aws_profile)
             if not frame.empty:
                 for col in ("init_time", "valid_time"):
                     frame[col] = pd.to_datetime(frame[col], utc=True)

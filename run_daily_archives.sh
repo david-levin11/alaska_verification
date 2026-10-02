@@ -19,12 +19,27 @@
 #   OBS_ELEMENTS="..."   # optional override for OBS elements
 
 set -Eeuo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# REFS defaults: retry two UTC days plus the earliest six-hour-lagged source run.
+RUN_REFS="${RUN_REFS:-1}"
+REFS_LOOKBACK_DAYS="${REFS_LOOKBACK_DAYS:-2}"
+SOURCE_STORAGE="${SOURCE_STORAGE:-local}"
+REFS_OUTPUT_ROOT="${REFS_OUTPUT_ROOT:-derived/refs}"
+if [[ ! "$REFS_LOOKBACK_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "REFS_LOOKBACK_DAYS must be a positive integer" >&2; exit 2
+fi
+STORAGE_ARGS=()
+case "$SOURCE_STORAGE" in
+  local) STORAGE_ARGS=(--local); REFS_ARCHIVE_ROOT="${REFS_ARCHIVE_ROOT:-model}" ;;
+  s3) REFS_ARCHIVE_ROOT="${REFS_ARCHIVE_ROOT:-s3://alaska-verification}" ;;
+  *) echo "SOURCE_STORAGE must be local or s3" >&2; exit 2 ;;
+esac
 
 declare -A AVAILABLE_FIELDS=(
   [nbm]="Wind snow6hr snow24hr snow48hr snow72hr"
   [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust rh"
   [hrrr]="Wind rh precip6hr snow6hr"
-  [rrfs]="Wind rh precip6hr snow6hr"
   [rrfs]="Wind rh precip6hr snow6hr"
   [rrfsens]="Wind rh precip6hr snow6hr"
   [urma]="Wind"
@@ -73,6 +88,11 @@ fi
 
 LOG_DIR="${LOG_DIR:-./logs}"
 mkdir -p "$LOG_DIR"
+# A monthly Parquet is a read/modify/write object: prevent overlapping cron jobs.
+exec 9>"$LOG_DIR/daily_archives.lock"
+if ! flock -n 9; then
+  echo "Another daily archive job is running" >&2; exit 1
+fi
 RUN_STAMP="$(date -u +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/archive_${RUN_STAMP}.log"
 
@@ -86,6 +106,7 @@ else
 fi
 
 RC=0
+REFS_SOURCE_FAILED=0
 
 # -------------------------------
 # Main model→element loop (NBM/HRRR/RRFS/URMA/NBMQMD*)
@@ -113,12 +134,19 @@ for model in "${MODEL_LIST[@]}"; do
       fi
     fi
 
+    if [[ "$RUN_REFS" == "1" && -z "${GLOBAL_START:-}" && "$model" =~ ^(hrrr|rrfs|rrfsens)$ ]]; then
+      base_epoch=$(date -u -d "${BASE_DATE} 00:00" +%s)
+      source_epoch=$((base_epoch - (REFS_LOOKBACK_DAYS - 1) * 86400 - 21600))
+      START=$(date -u -d "@${source_epoch}" +%Y%m%d%H%M)
+      END=$(date -u -d "@$((base_epoch + 64800))" +%Y%m%d%H%M)
+    fi
+
     cmd=( python run_model_archiver.py
           --start "${START}"
           --end "${END}"
           --model "${model}"
           --element "${element}"
-          --local )
+          "${STORAGE_ARGS[@]}" )
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
       log_info "DRY_RUN: ${cmd[*]}" | tee -a "$LOG_FILE"
@@ -131,9 +159,37 @@ for model in "${MODEL_LIST[@]}"; do
     else
       log_error "FAILED: model=${model} element=${element} (START=${START} END=${END})" | tee -a "$LOG_FILE"
       RC=1
+      if [[ "$model" =~ ^(hrrr|rrfs|rrfsens)$ ]]; then REFS_SOURCE_FAILED=1; fi
     fi
   done
 done
+
+# REFS statistics run only after every selected source model has finished.
+if [[ "$RUN_REFS" == "1" ]]; then
+  if [[ "$REFS_SOURCE_FAILED" == "1" ]]; then
+    log_error "Skipping REFS statistics because a source archiver failed." | tee -a "$LOG_FILE"
+  else
+    read -r -a refs_elements <<< "${REFS_ELEMENTS:-Wind rh precip6hr snow6hr}"
+    refs_cmd=(python run_refs_processing.py
+              --archive-root "$REFS_ARCHIVE_ROOT" --output-root "$REFS_OUTPUT_ROOT"
+              --elements "${refs_elements[@]}")
+    if [[ -n "${GLOBAL_START:-}" ]]; then
+      refs_cmd+=(--start "$GLOBAL_START" --end "$GLOBAL_END")
+    else
+      refs_cmd+=(--date "$BASE_DATE" --lookback-days "$REFS_LOOKBACK_DAYS")
+    fi
+    if [[ -n "${REFS_AWS_PROFILE:-}" ]]; then refs_cmd+=(--aws-profile "$REFS_AWS_PROFILE"); fi
+    if [[ "${REFS_ALLOW_INCOMPLETE:-0}" == "1" ]]; then refs_cmd+=(--allow-incomplete); fi
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+      log_info "DRY_RUN: ${refs_cmd[*]}" | tee -a "$LOG_FILE"
+    elif "${refs_cmd[@]}" >>"$LOG_FILE" 2>&1; then
+      log_info "OK: REFS monthly statistics" | tee -a "$LOG_FILE"
+    else
+      log_error "FAILED: REFS monthly statistics" | tee -a "$LOG_FILE"
+      RC=1
+    fi
+  fi
+fi
 
 # -------------------------------
 # NDFD loop (elements = keys of NDFD_DICT)
@@ -159,7 +215,7 @@ if [[ "$RUN_NDFD" == "1" ]]; then
                --start "${NDFD_START}"
                --end "${NDFD_END}"
                --element "${element}"
-               --local )
+               "${STORAGE_ARGS[@]}" )
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
       log_info "DRY_RUN: ${ndfd_cmd[*]}" | tee -a "$LOG_FILE"
@@ -202,7 +258,7 @@ if [[ "$RUN_OBS" == "1" ]]; then
               --start "${OBS_START}"
               --end "${OBS_END}"
               --element "${element}"
-              --local )
+              "${STORAGE_ARGS[@]}" )
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
       log_info "DRY_RUN: ${obs_cmd[*]}" | tee -a "$LOG_FILE"

@@ -1,39 +1,151 @@
-"""Assemble archived REFS members and optionally persist derived statistics."""
+"""Batch REFS statistics into monthly local/S3 archives, or inspect a single case."""
 import argparse
-from pathlib import Path
+import json
+import pandas as pd
 from ensemble_processing import assemble_refs, summarize_refs
+from refs_archive_io import update_monthly, write_parquet
+
+VALUES = {'wind': ['wind_speed_kt','wind_gust_kt'], 'precip6hr':['precip_6h'],
+          'snow6hr':['snow_6h'], 'rh':['rh']}
+
+
+def utc_time(value):
+    # Support compact dates used by the existing daily shell wrapper.
+    if isinstance(value,str) and value.isdigit() and len(value) in (10,12):
+        return pd.to_datetime(value,format='%Y%m%d%H' if len(value)==10 else '%Y%m%d%H%M',utc=True)
+    return pd.to_datetime(value,utc=True)
+
+
+def process_range(start, end, *, archive_root='model', output_root='derived/refs',
+                  elements=('Wind','rh','precip6hr','snow6hr'), forecast_hours=None,
+                  station_ids=None, thresholds=(), require_complete=True,
+                  max_forecast_hours=None, aws_profile=None, value_column=None):
+    """Process [start,end) UTC cycles; cache each source month once per element.
+
+    Monthly upserts preserve unrelated rows and make repeated cron runs safe.
+    """
+    start,end=utc_time(start),utc_time(end)
+    if start >= end:
+        raise ValueError('start must be earlier than the exclusive end')
+    leads=list(range(3,61,3)) if forecast_hours is None else sorted(set(forecast_hours))
+    if not leads or any(h<1 or h>60 for h in leads):
+        raise ValueError('Forecast hours must be integers between 1 and 60')
+    if value_column and len(elements)!=1:
+        raise ValueError('--value-column requires exactly one element')
+    limits={'rrfs':60,'rrfsens':60,'hrrr':48}
+    if max_forecast_hours:
+        limits.update(max_forecast_hours)
+    recipe=json.dumps(dict(thresholds=sorted(set(thresholds)),require_complete=require_complete,
+                           max_forecast_hours=limits,percentiles=[5,10,25,50,75,90,95],
+                           quantile_method='linear',weighting='equal',operator='>',version=1),sort_keys=True)
+    cycles=pd.date_range(start.ceil('6h'),end,freq='6h',inclusive='left')
+    if not len(cycles):
+        raise ValueError('No 00/06/12/18 UTC cycles in this interval')
+    written=[]
+    empty_cases=0
+    for element in elements:
+        element=element.lower()
+        if element not in VALUES:
+            raise ValueError(f'Unsupported element: {element}')
+        if value_column and value_column not in VALUES[element]:
+            raise ValueError(f'Unsupported value column {value_column!r} for {element}')
+        columns=[value_column] if value_column else VALUES[element]
+        cache={}
+        # Flush per initialization month to bound summary memory on backfills.
+        for month in sorted(set(cycles.strftime('%Y_%m'))):
+            summaries=[]
+            for cycle in cycles[cycles.strftime('%Y_%m')==month]:
+                for lead in leads:
+                    if element in ('precip6hr','snow6hr') and lead<6:
+                        continue
+                    members=assemble_refs(archive_root,element,cycle,cycle+pd.Timedelta(hours=lead),
+                                          station_ids=station_ids,max_forecast_hours=limits,
+                                          source_cache=cache,aws_profile=aws_profile)
+                    if members.empty:
+                        print(f'WARNING: No stations found for {element} {cycle} f{lead:03d}')
+                        empty_cases+=1
+                        continue
+                    for column in columns:
+                        # A missing field is a missing value, never a zero.
+                        if column not in members:
+                            members[column]=float('nan')
+                        summary=summarize_refs(members,column,thresholds=thresholds,
+                                               require_complete=require_complete)
+                        summary['statistics_config']=recipe
+                        summaries.append(summary)
+                print(f'Processed {element} cycle {cycle}')
+            if summaries:
+                combined=pd.concat(summaries,ignore_index=True)
+                print(f'{element}: {int(combined.complete.sum()):,}/{len(combined):,} complete station/lead/variable rows')
+                written.extend(update_monthly(combined,output_root,element,aws_profile))
+            # Retain only this month for the next month's lagged boundary.
+            cache={key:frame for key,frame in cache.items() if key[3]==month}
+    if not written:
+        raise ValueError('No statistics were written; check source archive paths, dates, and station coverage')
+    if empty_cases:
+        raise ValueError(f'{empty_cases} cycle/lead cases had no source rows; available cases were saved. Re-archive missing sources and rerun.')
+    return written
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--archive-root', default='model')
-    parser.add_argument('--element', required=True)
-    parser.add_argument('--cycle', required=True, help='REFS initialization, UTC')
-    parser.add_argument('--valid', required=True, help='Common valid time, UTC')
-    parser.add_argument('--value-column', required=True, help='e.g. wind_speed_kt, wind_gust_kt, precip_6h')
-    parser.add_argument('--stations', nargs='+')
-    parser.add_argument('--thresholds', nargs='*', type=float, default=[])
-    parser.add_argument('--allow-incomplete', action='store_true')
-    parser.add_argument('--output', help='Optional summary Parquet path (replaced if present)')
-    parser.add_argument('--members-output', help='Optional assembled member Parquet path')
-    parser.add_argument('--rrfs-max-hour', type=int, default=60)
-    parser.add_argument('--rrfsens-max-hour', type=int, default=60)
-    parser.add_argument('--hrrr-max-hour', type=int, default=48)
-    args = parser.parse_args()
-    members = assemble_refs(args.archive_root, args.element, args.cycle, args.valid,
-                            station_ids=args.stations,
-                            max_forecast_hours={'rrfs': args.rrfs_max_hour,
-                                                'rrfsens': args.rrfsens_max_hour,
-                                                'hrrr': args.hrrr_max_hour})
-    summary = summarize_refs(members, args.value_column, thresholds=args.thresholds,
-                             require_complete=not args.allow_incomplete)
-    print(summary.to_string(index=False) if not summary.empty else 'No stations found; supply --stations to report missing members.')
-    for frame, path in ((summary, args.output), (members, args.members_output)):
-        if path:
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-            frame.to_parquet(path, index=False)
-            print(f"Saved {len(frame):,} rows to {Path(path).resolve()}")
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--archive-root',default='model',help='Source local directory or S3 bucket/prefix')
+    parser.add_argument('--output-root',default='derived/refs',help='Monthly statistics directory or s3://bucket/prefix')
+    parser.add_argument('--aws-profile',help='Optional AWS profile; otherwise use normal AWS credential chain')
+    parser.add_argument('--date',help='UTC day to process; defaults to yesterday in batch mode')
+    parser.add_argument('--start',help='Inclusive UTC start for batch mode')
+    parser.add_argument('--end',help='Exclusive UTC end for batch mode')
+    parser.add_argument('--lookback-days',type=int,default=1,help='Number of days ending on --date (default 1)')
+    parser.add_argument('--element','--elements',dest='elements',nargs='+',default=None)
+    parser.add_argument('--forecast-hours',nargs='+',type=int)
+    parser.add_argument('--cycle',help='Single-case mode: REFS initialization, UTC')
+    parser.add_argument('--valid',help='Single-case mode: valid time, UTC')
+    parser.add_argument('--value-column')
+    parser.add_argument('--stations',nargs='+')
+    parser.add_argument('--thresholds',nargs='*',type=float,default=[])
+    parser.add_argument('--allow-incomplete',action='store_true')
+    parser.add_argument('--output',help='Single-case summary path (local/S3; replaced)')
+    parser.add_argument('--members-output',help='Single-case member path (local/S3; replaced)')
+    parser.add_argument('--rrfs-max-hour',type=int,default=60)
+    parser.add_argument('--rrfsens-max-hour',type=int,default=60)
+    parser.add_argument('--hrrr-max-hour',type=int,default=48)
+    args=parser.parse_args()
+    limits={'rrfs':args.rrfs_max_hour,'rrfsens':args.rrfsens_max_hour,'hrrr':args.hrrr_max_hour}
+    try:
+        if args.cycle or args.valid:
+            if not (args.cycle and args.valid and args.elements and len(args.elements)==1 and args.value_column):
+                parser.error('Single-case mode requires --cycle, --valid, one --element, and --value-column')
+            if args.date or args.start or args.end:
+                parser.error('Do not combine single-case and batch dates')
+            members=assemble_refs(args.archive_root,args.elements[0],args.cycle,args.valid,
+                                  station_ids=args.stations,max_forecast_hours=limits,aws_profile=args.aws_profile)
+            summary=summarize_refs(members,args.value_column,thresholds=args.thresholds,
+                                   require_complete=not args.allow_incomplete)
+            print(summary.to_string(index=False))
+            for frame,path in ((summary,args.output),(members,args.members_output)):
+                if path:
+                    write_parquet(frame,path,args.aws_profile)
+                    print(f'Saved {len(frame):,} rows to {path}')
+            return
+        if args.output or args.members_output:
+            parser.error('Batch mode uses --output-root; --output/--members-output are single-case options')
+        if args.lookback_days<1:
+            parser.error('--lookback-days must be positive')
+        if args.start or args.end:
+            if not (args.start and args.end) or args.date or args.lookback_days!=1:
+                parser.error('Use --start and --end together, without --date or --lookback-days')
+            start,end=args.start,args.end
+        else:
+            day=utc_time(args.date).normalize() if args.date else pd.Timestamp.now(tz='UTC').normalize()-pd.Timedelta(days=1)
+            start,end=day-pd.Timedelta(days=args.lookback_days-1),day+pd.Timedelta(days=1)
+        process_range(start,end,archive_root=args.archive_root,output_root=args.output_root,
+                      elements=args.elements or list(VALUES),forecast_hours=args.forecast_hours,
+                      station_ids=args.stations,thresholds=args.thresholds,
+                      require_complete=not args.allow_incomplete,max_forecast_hours=limits,
+                      aws_profile=args.aws_profile,value_column=args.value_column)
+    except (ValueError,OSError,KeyError) as exc:
+        parser.exit(1,f'REFS processing failed: {exc}\n')
 
 
-if __name__ == '__main__':
+if __name__=='__main__':
     main()

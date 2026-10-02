@@ -1,5 +1,8 @@
 # REFS station archives
 
+For daily batch processing and monthly local/S3 statistics, see [REFS_BATCH.md](REFS_BATCH.md).
+The daily wrapper now automatically runs this stage with a two-day source retry window.
+
 The `refs` branch builds on `rrfs`. Source forecasts are archived once:
 
 - `model/hrrr/{element}/YYYY_MM_archive.parquet`: existing HRRR archive.
