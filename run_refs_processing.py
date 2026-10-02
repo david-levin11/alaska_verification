@@ -32,6 +32,7 @@ def main():
         if path:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             frame.to_parquet(path, index=False)
+            print(f"Saved {len(frame):,} rows to {Path(path).resolve()}")
 
 
 if __name__ == '__main__':
