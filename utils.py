@@ -684,39 +684,12 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         except ValueError:
             print("     ❌ Could not determine forecast hour from filename.")
             return None
-        tr_end = fcst_hour
-        if element == 'precip24hr':
-            tr_start = fcst_hour - 24
-            if tr_end == 24:
-                accum_str = f"0-1 day acc fcst"
-            elif tr_end == 48:
-                accum_str = f"0-2 day acc fcst"
-            elif tr_end == 0:
-                accum_str = f"0-0 day acc fcst"
-            else:
-                accum_str = f"0-{tr_end} hour acc fcst"
-        elif element == 'precip6hr':
-            tr_start = fcst_hour - 6
-            if tr_end == 24:
-                accum_str = f"0-1 day acc fcst"
-            elif tr_end == 48:
-                accum_str = f"0-2 day acc fcst"
-            elif tr_end == 0:
-                accum_str = f"0-0 day acc fcst"
-            else:
-                accum_str = f"0-{tr_end} hour acc fcst"
-        elif element == 'snow6hr':
-            tr_start = fcst_hour - 6
-            if tr_end == 24:
-                accum_str = f"0-1 day acc fcst"
-            elif tr_end == 48:
-                accum_str = f"0-2 day acc fcst"
-            elif tr_end == 0:
-                accum_str = f"0-0 day acc fcst"
-            else:
-                accum_str = f"0-{tr_end} hour acc fcst"
-        else:
-            raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
+        # These source fields are totals since initialization. Match a whole
+        # index field: "0-51" must never also select "50-51" (one-hour QPF).
+        # Accept both equivalent hour/day labels at 24-hour boundaries.
+        accumulation_labels = {f"0-{fcst_hour} hour acc fcst"}
+        if fcst_hour % 24 == 0:
+            accumulation_labels.add(f"0-{fcst_hour // 24} day acc fcst")
         # Compile search patterns
         search_exprs = [re.escape(s) for s in search_strings]
         search_pattern = re.compile("|".join(search_exprs))
@@ -725,7 +698,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
                 continue
             if not search_pattern.search(line):
                 continue
-            if accum_str not in line:
+            if not accumulation_labels.intersection(field.strip() for field in line.split(":")):
                 continue
             parts = line.split(':')
             rangestart = int(parts[1])
