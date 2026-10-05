@@ -5,7 +5,7 @@ from pathlib import Path
 
 DEFAULT_CONFIG = Path(__file__).with_name('refs_thresholds.json')
 UNITS = {'wind_speed_kt': 'kt', 'wind_gust_kt': 'kt', 'precip_6h': 'in',
-         'snow_6h': 'in', 'rh': '%'}
+         'snow_6h': 'in', 'rh': '%', 'temp_2m_f': 'degF'}
 
 
 def validate_recipe(variable, recipe):
@@ -20,10 +20,10 @@ def validate_recipe(variable, recipe):
     values = recipe['thresholds']
     if not isinstance(values, list) or any(
         isinstance(v, bool) or not isinstance(v, (int, float)) or
-        not math.isfinite(v) or v < 0 or (variable == 'rh' and v > 100)
+        not math.isfinite(v) or (variable != 'temp_2m_f' and v < 0) or (variable == 'rh' and v > 100)
         for v in values
     ):
-        raise ValueError(f'{variable}: thresholds must be finite nonnegative numbers (RH 0–100)')
+        raise ValueError(f'{variable}: thresholds must be finite numbers; only temperature may be negative (RH 0–100)')
     return dict(units=recipe['units'], operator=recipe['operator'],
                 thresholds=sorted(set(float(v) for v in values)))
 
@@ -31,6 +31,9 @@ def validate_recipe(variable, recipe):
 def load_threshold_config(path=None):
     with Path(path or DEFAULT_CONFIG).open() as stream:
         config = json.load(stream)
+    # Older custom configurations remain usable; temperature probabilities are opt-in.
+    if isinstance(config, dict):
+        config.setdefault('temp_2m_f', dict(units='degF', operator='<', thresholds=[]))
     if not isinstance(config, dict) or set(config) != set(UNITS):
         raise ValueError(f'Threshold config must contain exactly: {", ".join(UNITS)}')
     return {variable: validate_recipe(variable, recipe) for variable, recipe in config.items()}

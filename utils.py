@@ -1133,6 +1133,13 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 record[renamed_var] = float(val)
 
                             all_records.append(record)
+                        elif element == 'temp2m':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                kelvin = ds[grib_var].values[iy, ix]
+                                record[renamed_var] = round(float((kelvin - 273.15) * 1.8 + 32), 2)
+                            all_records.append(record)
                         elif element == 'rh':
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
@@ -1183,6 +1190,13 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 val = M_to_IN(ds[grib_var].values[iy, ix])
                                 record[renamed_var] = float(val)
 
+                            all_records.append(record)
+                        elif element == 'temp2m':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                kelvin = ds[grib_var].values[iy, ix]
+                                record[renamed_var] = round(float((kelvin - 273.15) * 1.8 + 32), 2)
                             all_records.append(record)
                         elif element == 'rh':
                             for grib_var, renamed_var in rename_map.items():

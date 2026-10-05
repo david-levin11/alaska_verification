@@ -7,7 +7,7 @@ from refs_archive_io import update_monthly, write_parquet
 from refs_threshold_config import DEFAULT_CONFIG, resolve_threshold_config
 
 VALUES = {'wind': ['wind_speed_kt','wind_gust_kt'], 'precip6hr':['precip_6h'],
-          'snow6hr':['snow_6h'], 'rh':['rh']}
+          'snow6hr':['snow_6h'], 'rh':['rh'], 'temp2m':['temp_2m_f']}
 
 
 def utc_time(value):
@@ -18,7 +18,7 @@ def utc_time(value):
 
 
 def process_range(start, end, *, archive_root='model', output_root='derived/refs',
-                  elements=('Wind','rh','precip6hr','snow6hr'), forecast_hours=None,
+                  elements=('Wind','rh','precip6hr','snow6hr','temp2m'), forecast_hours=None,
                   station_ids=None, thresholds=None, require_complete=True,
                   max_forecast_hours=None, aws_profile=None, value_column=None, threshold_config=None):
     """Process [start,end) UTC cycles; cache each source month once per element.

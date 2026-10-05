@@ -39,9 +39,9 @@ esac
 declare -A AVAILABLE_FIELDS=(
   [nbm]="Wind snow6hr snow24hr snow48hr snow72hr"
   [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust rh"
-  [hrrr]="Wind rh precip6hr snow6hr"
-  [rrfs]="Wind rh precip6hr snow6hr"
-  [rrfsens]="Wind rh precip6hr snow6hr"
+  [hrrr]="Wind rh precip6hr snow6hr temp2m"
+  [rrfs]="Wind rh precip6hr snow6hr temp2m"
+  [rrfsens]="Wind rh precip6hr snow6hr temp2m"
   [urma]="Wind"
 )
 
@@ -169,7 +169,7 @@ if [[ "$RUN_REFS" == "1" ]]; then
   if [[ "$REFS_SOURCE_FAILED" == "1" ]]; then
     log_error "Skipping REFS statistics because a source archiver failed." | tee -a "$LOG_FILE"
   else
-    read -r -a refs_elements <<< "${REFS_ELEMENTS:-Wind rh precip6hr snow6hr}"
+    read -r -a refs_elements <<< "${REFS_ELEMENTS:-Wind rh precip6hr snow6hr temp2m}"
     refs_cmd=(python run_refs_processing.py
               --archive-root "$REFS_ARCHIVE_ROOT" --output-root "$REFS_OUTPUT_ROOT"
               --threshold-config "${REFS_THRESHOLD_CONFIG:-refs_thresholds.json}"
