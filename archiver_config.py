@@ -610,6 +610,25 @@ MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
 # for process pool operations
 MAX_WORKERS = 4
 
+# Instantaneous 2-meter temperature, distinct from daily maxt/mint.
+for _model in ('hrrr', 'rrfs'):
+    AVAILABLE_FIELDS[_model].append('temp2m')
+    HERBIE_FORECASTS[_model]['temp2m'] = list(HERBIE_FORECASTS[_model]['rh'])
+HERBIE_XARRAY_STRINGS['temp2m'] = {
+    model: [':TMP:2 m above ground:'] for model in ('hrrr', 'rrfs')
+}
+HERBIE_REQUIRED_PHRASES['temp2m'] = {
+    model: [':TMP:2 m above ground:'] for model in ('hrrr', 'rrfs')
+}
+HERBIE_EXCLUDE_PHRASES['temp2m'] = {
+    model: ['ens std dev'] for model in ('hrrr', 'rrfs')
+}
+HERBIE_RENAME_MAP['temp2m'] = {
+    model: {'t2m': 'temp_2m_f'} for model in ('hrrr', 'rrfs')
+}
+# Temperature needs an offset, applied explicitly during extraction.
+HERBIE_UNIT_CONVERSIONS['temp2m'] = {'hrrr': {}, 'rrfs': {}}
+
 # Source runs are archived once; six-hour lagging happens in ensemble_processing.
 RRFS_MEMBERS = ("m001", "m002", "m003", "m004", "m005")
 MODEL_URLS["rrfs"] = "https://noaa-rrfs-ops-pds.s3.amazonaws.com"

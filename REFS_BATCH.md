@@ -172,3 +172,41 @@ For a full month, use `--start 2026-10-01 --end 2026-11-01` and the elements who
 sources you have archived. Dates select initialization cycles, not valid dates.
 Changing thresholds later requires rebuilding affected derived monthly files or
 using a different output root, so a monthly archive never silently mixes recipes.
+
+
+## Instantaneous 2-meter temperature
+
+`temp2m` is archived for HRRR, RRFS control, and all five RRFS perturbations
+(`rrfsens`). The daily wrapper includes it in source archiving and REFS processing.
+`:TMP:2 m above ground:` matches the index entry with or without the ensemble
+suffix. Member identity comes from each member's source URL and `member_id`.
+GRIB `t2m` in kelvin is converted using `(K - 273.15) * 1.8 + 32`, stored as
+`temp_2m_f`. This is instantaneous temperature, not daily maximum/minimum.
+
+Sources use `model/{hrrr,rrfs,rrfsens}/temp2m/YYYY_MM_archive.parquet` locally;
+S3 sources retain the existing per-model layout. Derived output is
+`derived/refs/temp2m/YYYY_MM_archive.parquet` (or the configured S3 output root).
+REFS includes current and six-hour-lagged runs, with the same lead-dependent
+member counts and completeness rules as wind. Means and percentiles are °F;
+spread is in Fahrenheit degrees.
+
+Temperature probabilities default to disabled (`thresholds: []`). To add cold
+thresholds, edit `temp_2m_f` in `refs_thresholds.json`, for example:
+
+```json
+"temp_2m_f": {"units": "degF", "operator": "<", "thresholds": [-40, -20, 0, 32]}
+```
+
+Comparisons are strict; `< 32` excludes exactly 32°F. Negative temperature
+thresholds are accepted. Older custom JSON files without the temperature entry
+remain valid and default to no temperature probabilities. Existing wind/RH/
+precipitation/snow statistics recipes are unchanged; these files need no rebuild.
+After archiving temperature sources, process an existing date with:
+
+```bash
+python run_refs_processing.py --date 2026-10-04 --elements temp2m
+```
+
+Use `python run_model_archiver.py --help` for source backfill options. A derived-only
+run cannot produce temperature from wind Parquets; temperature sources must be
+archived first, including the preceding 18Z run for the day's first lagged members.
