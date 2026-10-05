@@ -1,11 +1,4 @@
 {
-<<<<<<< HEAD
-  "wind_speed_kt": {"units": "kt", "operator": ">", "thresholds": [10, 15, 20, 25, 30, 34, 40, 48]},
-  "wind_gust_kt": {"units": "kt", "operator": ">", "thresholds": [20, 25, 30, 34, 40, 48, 55, 64]},
-  "precip_6h": {"units": "in", "operator": ">", "thresholds": [0.01, 0.1, 0.25, 0.5, 1, 2]},
-  "snow_6h": {"units": "in", "operator": ">", "thresholds": [0.1, 1, 2, 3, 4, 6, 8, 12]},
-  "rh": {"units": "%", "operator": "<", "thresholds": [10, 15, 20, 25, 30]}
-=======
   "wind_speed_kt": {
     "units": "kt",
     "operator": ">",
@@ -15,9 +8,9 @@
       20,
       25,
       30,
-      35,
+      34,
       40,
-      50
+      48
     ]
   },
   "wind_gust_kt": {
@@ -27,10 +20,11 @@
       20,
       25,
       30,
-      35,
+      34,
       40,
-      50,
-      60
+      48,
+      55,
+      64
     ]
   },
   "precip_6h": {
@@ -54,13 +48,16 @@
       2,
       3,
       4,
-      6
+      6,
+      8,
+      12
     ]
   },
   "rh": {
     "units": "%",
     "operator": "<",
     "thresholds": [
+      10,
       15,
       20,
       25,
@@ -71,7 +68,13 @@
   "temp_2m_f": {
     "units": "degF",
     "operator": "<",
-    "thresholds": []
+    "thresholds": [
+      -40,
+      -30,
+      -20,
+      -10,
+      0,
+      32
+    ]
   }
->>>>>>> 8bd21fc15c738bf15d0b0115723a85db26928528
 }
