@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from ensemble_processing import assemble_refs, summarize_refs
 from refs_archive_io import update_monthly, write_parquet
+from refs_threshold_config import DEFAULT_CONFIG, resolve_threshold_config
 
 VALUES = {'wind': ['wind_speed_kt','wind_gust_kt'], 'precip6hr':['precip_6h'],
           'snow6hr':['snow_6h'], 'rh':['rh']}
@@ -18,8 +19,8 @@ def utc_time(value):
 
 def process_range(start, end, *, archive_root='model', output_root='derived/refs',
                   elements=('Wind','rh','precip6hr','snow6hr'), forecast_hours=None,
-                  station_ids=None, thresholds=(), require_complete=True,
-                  max_forecast_hours=None, aws_profile=None, value_column=None):
+                  station_ids=None, thresholds=None, require_complete=True,
+                  max_forecast_hours=None, aws_profile=None, value_column=None, threshold_config=None):
     """Process [start,end) UTC cycles; cache each source month once per element.
 
     Monthly upserts preserve unrelated rows and make repeated cron runs safe.
@@ -35,9 +36,11 @@ def process_range(start, end, *, archive_root='model', output_root='derived/refs
     limits={'rrfs':60,'rrfsens':60,'hrrr':48}
     if max_forecast_hours:
         limits.update(max_forecast_hours)
-    recipe=json.dumps(dict(thresholds=sorted(set(thresholds)),require_complete=require_complete,
-                           max_forecast_hours=limits,percentiles=[5,10,25,50,75,90,95],
-                           quantile_method='linear',weighting='equal',operator='>',version=1),sort_keys=True)
+    config=resolve_threshold_config(threshold_config,thresholds,value_column)
+    recipes={column: json.dumps(dict(**settings,require_complete=require_complete,
+             max_forecast_hours=limits,percentiles=[5,10,25,50,75,90,95],
+             quantile_method='linear',weighting='equal',version=2),sort_keys=True)
+             for column,settings in config.items()}
     cycles=pd.date_range(start.ceil('6h'),end,freq='6h',inclusive='left')
     if not len(cycles):
         raise ValueError('No 00/06/12/18 UTC cycles in this interval')
@@ -69,9 +72,10 @@ def process_range(start, end, *, archive_root='model', output_root='derived/refs
                         # A missing field is a missing value, never a zero.
                         if column not in members:
                             members[column]=float('nan')
-                        summary=summarize_refs(members,column,thresholds=thresholds,
+                        summary=summarize_refs(members,column,thresholds=config[column]["thresholds"],
+                                               probability_operator=config[column]["operator"],
                                                require_complete=require_complete)
-                        summary['statistics_config']=recipe
+                        summary['statistics_config']=recipes[column]
                         summaries.append(summary)
                 print(f'Processed {element} cycle {cycle}')
             if summaries:
@@ -102,7 +106,10 @@ def main():
     parser.add_argument('--valid',help='Single-case mode: valid time, UTC')
     parser.add_argument('--value-column')
     parser.add_argument('--stations',nargs='+')
-    parser.add_argument('--thresholds',nargs='*',type=float,default=[])
+    parser.add_argument('--thresholds',nargs='*',type=float,default=None,
+                        help='Strict > override for one --value-column; empty list disables probabilities')
+    parser.add_argument('--threshold-config',default=str(DEFAULT_CONFIG),
+                        help='Variable-specific JSON probability configuration')
     parser.add_argument('--allow-incomplete',action='store_true')
     parser.add_argument('--output',help='Single-case summary path (local/S3; replaced)')
     parser.add_argument('--members-output',help='Single-case member path (local/S3; replaced)')
@@ -117,9 +124,12 @@ def main():
                 parser.error('Single-case mode requires --cycle, --valid, one --element, and --value-column')
             if args.date or args.start or args.end:
                 parser.error('Do not combine single-case and batch dates')
+            config=resolve_threshold_config(args.threshold_config,args.thresholds,args.value_column)
+            settings=config[args.value_column]
             members=assemble_refs(args.archive_root,args.elements[0],args.cycle,args.valid,
                                   station_ids=args.stations,max_forecast_hours=limits,aws_profile=args.aws_profile)
-            summary=summarize_refs(members,args.value_column,thresholds=args.thresholds,
+            summary=summarize_refs(members,args.value_column,thresholds=settings["thresholds"],
+                                   probability_operator=settings["operator"],
                                    require_complete=not args.allow_incomplete)
             print(summary.to_string(index=False))
             for frame,path in ((summary,args.output),(members,args.members_output)):
@@ -140,7 +150,7 @@ def main():
             start,end=day-pd.Timedelta(days=args.lookback_days-1),day+pd.Timedelta(days=1)
         process_range(start,end,archive_root=args.archive_root,output_root=args.output_root,
                       elements=args.elements or list(VALUES),forecast_hours=args.forecast_hours,
-                      station_ids=args.stations,thresholds=args.thresholds,
+                      station_ids=args.stations,thresholds=args.thresholds,threshold_config=args.threshold_config,
                       require_complete=not args.allow_incomplete,max_forecast_hours=limits,
                       aws_profile=args.aws_profile,value_column=args.value_column)
     except (ValueError,OSError,KeyError) as exc:

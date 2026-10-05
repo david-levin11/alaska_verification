@@ -37,12 +37,12 @@ For backfills, `--start` is inclusive and `--end` is exclusive:
 python run_refs_processing.py --start 2026-09-30 --end 2026-10-02 --elements Wind
 ```
 
-`--forecast-hours 6 12 24 48` restricts leads. `--thresholds 20 30 40` adds strict
-exceedance probabilities (fractions, not percentages) in the selected variables'
-units. Default batch output contains mean, spread and percentiles; thresholds are
-not assumed across different weather elements. Prefer separate invocations per
-element when selecting thresholds. `--value-column` restricts one element to one
-variable, e.g. wind speed only. `--stations` limits station selection.
+`--forecast-hours 6 12 24 48` restricts leads. Probabilities are now generated
+by default using `refs_thresholds.json`, alongside mean, spread, and percentiles.
+`--threshold-config /path/to/custom.json` selects another configuration.
+`--value-column` restricts one element to one variable. For that variable only,
+`--thresholds 20 30 40` overrides the configuration with strict `>` probabilities;
+`--thresholds` with no values disables probabilities.
 
 The previous `--cycle`, `--valid`, `--value-column`, `--output`, and
 `--members-output` single-case mode is preserved. Batch mode uses `--output-root`
@@ -117,3 +117,58 @@ previous lagged source runs are already archived when using explicit ranges.
 
 Tests: `python -m pytest -q tests/test_refs_batch.py` (includes emulated S3 IO;
 no user bucket is written during tests).
+
+
+## Variable-specific probabilities
+
+Edit `refs_thresholds.json` before creating your derived archives. These are
+starting thresholds, not official warning criteria. Units must match the member
+archive; no unit conversions are performed by this configuration.
+
+| Variable | Units | Operator | Default thresholds |
+| --- | --- | --- | --- |
+| wind_speed_kt | knots | > | 10, 15, 20, 25, 30, 35, 40, 50 |
+| wind_gust_kt | knots | > | 20, 25, 30, 35, 40, 50, 60 |
+| precip_6h | inches / 6 hours | > | 0.01, 0.1, 0.25, 0.5, 1, 2 |
+| snow_6h | inches / 6 hours | > | 0.1, 1, 2, 3, 4, 6 |
+| rh | percent | < | 15, 20, 25, 30, 40 |
+
+Each entry has `units`, `operator` (`>` or `<`), and `thresholds`. Use an empty
+array to disable probability fields for a variable. RH defaults to dry-condition
+probabilities; change its operator to `>` if you want high-humidity exceedances.
+The loader validates all entries before batch processing begins.
+
+`prob_gt_30` means the fraction of available members strictly above 30 in that
+row's variable units. `prob_lt_30` means strictly below 30. Values are fractions
+from 0 to 1, not percentages. Equality does not count. Missing members follow the
+same completeness policy as percentiles: by default all statistics are NaN until
+all expected members are available. With `--allow-incomplete`, the denominator
+is `n_available`. Always retain the member count and completeness metadata.
+
+Wind speed and gust share a file but have separate `value_column` rows and
+threshold recipes. Columns not configured for a row's variable are NaN; these
+structural NaNs do not indicate missing member data. `statistics_config` records
+the recipe per variable. Reruns may update a single variable without removing
+other variables, but incompatible recipes for the same variable are rejected.
+
+The daily wrapper uses this configuration automatically for local and S3 output:
+
+```bash
+./run_daily_archives.sh
+REFS_THRESHOLD_CONFIG=/absolute/path/custom_thresholds.json ./run_daily_archives.sh
+```
+
+Existing derived monthly files use the previous statistics recipe. Move aside or
+remove only the affected files under `derived/refs/` before rebuilding them with
+the new fields, or select a fresh `--output-root`. Keep the `model/` member archives;
+there is no need to download GRIBs again just to add probabilities. For example,
+rebuild October 1 wind statistics from existing sources into a fresh directory:
+
+```bash
+python run_refs_processing.py --date 2026-10-01 --elements Wind --output-root derived/refs_threshold_test
+```
+
+For a full month, use `--start 2026-10-01 --end 2026-11-01` and the elements whose
+sources you have archived. Dates select initialization cycles, not valid dates.
+Changing thresholds later requires rebuilding affected derived monthly files or
+using a different output root, so a monthly archive never silently mixes recipes.

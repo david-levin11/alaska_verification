@@ -65,8 +65,11 @@ def update_monthly(frame, output_root, element, profile=None):
             with fs.open(key,'rb') as stream:
                 old = pd.read_parquet(stream)
             if not old.empty:
-                if 'statistics_config' not in old or set(old.statistics_config) != set(new.statistics_config):
+                if 'statistics_config' not in old or 'statistics_config' not in new:
                     raise ValueError(f'Statistics recipe differs in {path}; use a separate output root for this experiment')
+                for variable, rows in pd.concat([old,new],ignore_index=True).groupby('value_column'):
+                    if rows.statistics_config.isna().any() or rows.statistics_config.nunique() != 1:
+                        raise ValueError(f'Statistics recipe differs for {variable} in {path}; rebuild this derived file or use a separate output root')
                 combined = pd.concat([old,new],ignore_index=True)
         # Stable sort: complete beats incomplete; otherwise the newest row wins.
         combined = combined.sort_values('complete',kind='stable').drop_duplicates(keys,keep='last')

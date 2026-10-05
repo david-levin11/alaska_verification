@@ -92,12 +92,13 @@ def test_shell_stage_order_lookback_and_failure(tmp_path):
     fake.chmod(0o755)
     log=tmp_path/'calls'
     env=dict(os.environ,PATH=str(tmp_path)+':'+os.environ['PATH'],CALL_LOG=str(log),
-             MODELS='hrrr rrfs rrfsens',RUN_NDFD='0',RUN_OBS='0',REFS_ELEMENTS='Wind')
+             MODELS='hrrr rrfs rrfsens',RUN_NDFD='0',RUN_OBS='0',REFS_ELEMENTS='Wind',REFS_THRESHOLD_CONFIG='/tmp/custom_refs.json')
     result=subprocess.run(['bash',str(tmp_path/script.name),'2026-10-01'],env=env,capture_output=True,text=True)
     assert result.returncode==0,result.stderr
     calls=log.read_text().splitlines()
     assert calls[-1].startswith('run_refs_processing.py')
     assert '--lookback-days 2' in calls[-1]
+    assert '--threshold-config /tmp/custom_refs.json' in calls[-1]
     assert '--start 202609291800' in calls[0] and '--end 202610011800' in calls[0]
     log.unlink()
     result=subprocess.run(['bash',str(tmp_path/script.name),'2026-10-01'],env=dict(env,FAIL_SOURCE='1'),capture_output=True,text=True)

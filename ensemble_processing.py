@@ -133,7 +133,7 @@ def assemble_refs(archive_root, element, ensemble_init_time, valid_time, *,
 
 
 def summarize_refs(members, value_column, *, percentiles=(5, 10, 25, 50, 75, 90, 95),
-                   thresholds=(), require_complete=True):
+                   thresholds=(), require_complete=True, probability_operator=">"):
     """Equal-weight member statistics; probabilities use strict >, on a 0-1 scale.
 
     Default: suppress statistics if any expected value is missing. Set
@@ -150,6 +150,8 @@ def summarize_refs(members, value_column, *, percentiles=(5, 10, 25, 50, 75, 90,
     keys = ["station_id", "ensemble_init_time", "valid_time", "ensemble_forecast_hour"]
     if members.duplicated(keys + ["ensemble_member_id"]).any():
         raise ValueError("Duplicate ensemble members")
+    if probability_operator not in (">", "<"):
+        raise ValueError("Probability operator must be > or <")
     output = []
     for group, frame in members.groupby(keys, dropna=False):
         values = pd.to_numeric(frame.get(value_column, pd.Series(np.nan, index=frame.index)), errors="coerce")
@@ -159,12 +161,14 @@ def summarize_refs(members, value_column, *, percentiles=(5, 10, 25, 50, 75, 90,
         row = dict(zip(keys, group))
         row.update(value_column=value_column, n_expected=expected, n_available=n,
                    complete=n == expected, quantile_method="linear", weighting="equal",
-                   probability_operator=">", require_complete=require_complete)
+                   probability_operator=probability_operator, require_complete=require_complete)
         row["mean"] = float(np.mean(values)) if usable else np.nan
         row["spread"] = float(np.std(values)) if usable else np.nan
         for p in percentiles:
             row[f"p{p:g}"] = float(np.percentile(values, p, method="linear")) if usable else np.nan
         for threshold in thresholds:
-            row[f"prob_gt_{threshold:g}"] = float(np.mean(values > threshold)) if usable else np.nan
+            prefix = "gt" if probability_operator == ">" else "lt"
+            hits = values > threshold if probability_operator == ">" else values < threshold
+            row[f"prob_{prefix}_{threshold:g}"] = float(np.mean(hits)) if usable else np.nan
         output.append(row)
     return pd.DataFrame(output)

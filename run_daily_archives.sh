@@ -172,6 +172,7 @@ if [[ "$RUN_REFS" == "1" ]]; then
     read -r -a refs_elements <<< "${REFS_ELEMENTS:-Wind rh precip6hr snow6hr}"
     refs_cmd=(python run_refs_processing.py
               --archive-root "$REFS_ARCHIVE_ROOT" --output-root "$REFS_OUTPUT_ROOT"
+              --threshold-config "${REFS_THRESHOLD_CONFIG:-refs_thresholds.json}"
               --elements "${refs_elements[@]}")
     if [[ -n "${GLOBAL_START:-}" ]]; then
       refs_cmd+=(--start "$GLOBAL_START" --end "$GLOBAL_END")
