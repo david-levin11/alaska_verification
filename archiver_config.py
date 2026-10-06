@@ -25,7 +25,7 @@ WIND_OBS_FILE_COMPRESSED = f"alaska_{ELEMENT.lower()}_obs.parquet"
 
 
 ###################### Synoptic Params ##########################
-API_KEY = "c6c8a66a96094960aabf1fed7d07ccf0" # link to get an API key can be found at https://docs.google.com/document/d/1YuMUYog4J7DpFoEszMmFir4Ehqk9Q0GHG_QhSdrgV9M/edit?usp=sharing
+API_KEY = os.environ.get("SYNOPTIC_API_KEY", "")
 
 TIMESERIES_URL = "https://api.synopticdata.com/v2/stations/timeseries"
 # This will need to be changed after the new Synoptic statistics API is released.
@@ -135,17 +135,18 @@ HERBIE_FORECASTS = {
             'Wind': list(range(3,168,3)),
             'Gust': list(range(3,168,3))
         },
+        # Keep f003 cumulative endpoints: f009 six-hour totals need f009 - f003.
 		'hrrr':{
             'Wind': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
             'rh': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
-            'precip6hr': [6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
-            'snow6hr': [6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'precip6hr': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+            'snow6hr': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
         },
         'rrfs':{
             'Wind': list(range(3,85,3)),
             'rh': list(range(3,85,3)),
-            'precip6hr': list(range(6,85,3)),
-            'snow6hr': list(range(6,85,3))
+            'precip6hr': list(range(3,85,3)),
+            'snow6hr': list(range(3,85,3))
         },
 		'urma':{
             'Wind':[0]
@@ -609,3 +610,33 @@ MODEL_URLS = {'nbm': "https://noaa-nbm-grib2-pds.s3.amazonaws.com",
 #################### Processing Params ########################
 # for process pool operations
 MAX_WORKERS = 4
+
+# Instantaneous 2-meter temperature, distinct from daily maxt/mint.
+for _model in ('hrrr', 'rrfs'):
+    AVAILABLE_FIELDS[_model].append('temp2m')
+    HERBIE_FORECASTS[_model]['temp2m'] = list(HERBIE_FORECASTS[_model]['rh'])
+HERBIE_XARRAY_STRINGS['temp2m'] = {
+    model: [':TMP:2 m above ground:'] for model in ('hrrr', 'rrfs')
+}
+HERBIE_REQUIRED_PHRASES['temp2m'] = {
+    model: [':TMP:2 m above ground:'] for model in ('hrrr', 'rrfs')
+}
+HERBIE_EXCLUDE_PHRASES['temp2m'] = {
+    model: ['ens std dev'] for model in ('hrrr', 'rrfs')
+}
+HERBIE_RENAME_MAP['temp2m'] = {
+    model: {'t2m': 'temp_2m_f'} for model in ('hrrr', 'rrfs')
+}
+# Temperature needs an offset, applied explicitly during extraction.
+HERBIE_UNIT_CONVERSIONS['temp2m'] = {'hrrr': {}, 'rrfs': {}}
+
+# Source runs are archived once; six-hour lagging happens in ensemble_processing.
+RRFS_MEMBERS = ("m001", "m002", "m003", "m004", "m005")
+MODEL_URLS["rrfs"] = "https://noaa-rrfs-ops-pds.s3.amazonaws.com"
+MODEL_URLS["rrfsens"] = MODEL_URLS["rrfs"]
+HERBIE_MODELS.append("rrfsens")
+AVAILABLE_FIELDS["rrfsens"] = list(AVAILABLE_FIELDS["rrfs"])
+HERBIE_FORECASTS["rrfsens"] = {field: list(range(3, 61, 3))
+                               for field in AVAILABLE_FIELDS["rrfsens"]}
+HERBIE_CYCLES["rrfsens"] = "6h"
+S3_URLS["rrfsens"] = "s3://alaska-verification/rrfsens/"

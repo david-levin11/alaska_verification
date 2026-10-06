@@ -114,3 +114,9 @@ Have ideas for improvements or want to support additional datasets? Open a pull 
 
 ---
 
+
+## REFS ensemble archiving
+
+See [REFS.md](REFS.md) for archiving the five RRFS perturbed members, combining
+them with existing RRFS/HRRR archives and six-hour-lagged runs, and calculating
+station-level ensemble percentiles and exceedance probabilities.

@@ -7,6 +7,7 @@ import shutil
 import pygrib
 import numpy as np
 import pandas as pd
+from ensemble_processing import add_interval_precip_from_total
 import requests
 import fsspec
 import xarray as xr
@@ -471,7 +472,7 @@ def labels_for_day_accum(fcst_hour: int, interval=24):
     return alts
 
 
-def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model="nbm", domain="ak"):
+def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model="nbm", domain="ak", member_id=None):
     """
     Generate available NBM HTTPS URLs by checking if the index file (.idx) exists.
 
@@ -514,6 +515,8 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
         print(f"url formatting for {base_url} for {model} not implemented. Check file name on AWS such as 'blend.t12z.f024.ak.grib2'.")
         raise NotImplementedError
         sys.exit()
+    if member_id is not None and (model != "rrfs" or member_id not in config.RRFS_MEMBERS):
+        raise ValueError("member_id must be an RRFS perturbed member (m001-m005)")
     file_urls = []
     for init in init_times:
         init_date = init.strftime("%Y%m%d")
@@ -531,15 +534,19 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
                     print(f"⚠️ Missing: {idx_url} — {r.status_code}")
             except requests.exceptions.RequestException as e:
                 print(f"⚠️ Error accessing {idx_url}: {e}")
-        # rrfs has to come in through NOMADS for now
+        # RRFS control and perturbations share decoding but use different paths.
         elif model == 'rrfs':
             for fh in fcst_hours:
                 fxx = f"f{fh:03d}"
                 relative_path = f"{designator}.{init_date}/{init_hour}/{designator}.t{init_hour}z.{rrfs_lev}.{rrfs_res}.{fxx}.{domain}.grib2"
+                if member_id is not None:
+                    relative_path = (f"rrfsens.{init_date}/{init_hour}/{member_id}/"
+                                     f"rrfs.t{init_hour}z.{member_id}.{rrfs_lev}nomads."
+                                     f"{rrfs_res}.{fxx}.{domain}.grib2")
                 full_url = f"{base_url}/{relative_path}"
                 idx_url = full_url + ".idx"
                 try:
-                    r = requests.head(idx_url, timeout=5)
+                    r = requests.head(idx_url, timeout=20)
                     if r.ok:
                         file_urls.append(full_url)
                     else:
@@ -592,7 +599,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
 
     # Download .idx file
     idx_url = remote_url + ".idx"
-    r = requests.get(idx_url)
+    r = requests.get(idx_url, timeout=60)
     if not r.ok:
         print(f'     ❌ Could not get index file: {idx_url} ({r.status_code} {r.reason})')
         return None
@@ -677,39 +684,12 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         except ValueError:
             print("     ❌ Could not determine forecast hour from filename.")
             return None
-        tr_end = fcst_hour
-        if element == 'precip24hr':
-            tr_start = fcst_hour - 24
-            if tr_end == 24:
-                accum_str = f"0-1 day acc fcst"
-            elif tr_end == 48:
-                accum_str = f"0-2 day acc fcst"
-            elif tr_end == 0:
-                accum_str = f"0-0 day acc fcst"
-            else:
-                accum_str = f"0-{tr_end} hour acc fcst"
-        elif element == 'precip6hr':
-            tr_start = fcst_hour - 6
-            if tr_end == 24:
-                accum_str = f"0-1 day acc fcst"
-            elif tr_end == 48:
-                accum_str = f"0-2 day acc fcst"
-            elif tr_end == 0:
-                accum_str = f"0-0 day acc fcst"
-            else:
-                accum_str = f"0-{tr_end} hour acc fcst"
-        elif element == 'snow6hr':
-            tr_start = fcst_hour - 6
-            if tr_end == 24:
-                accum_str = f"0-1 day acc fcst"
-            elif tr_end == 48:
-                accum_str = f"0-2 day acc fcst"
-            elif tr_end == 0:
-                accum_str = f"0-0 day acc fcst"
-            else:
-                accum_str = f"0-{tr_end} hour acc fcst"
-        else:
-            raise NotImplementedError(f"Adjust your time step for {element} and {model} in download_subset in utils.py")
+        # These source fields are totals since initialization. Match a whole
+        # index field: "0-51" must never also select "50-51" (one-hour QPF).
+        # Accept both equivalent hour/day labels at 24-hour boundaries.
+        accumulation_labels = {f"0-{fcst_hour} hour acc fcst"}
+        if fcst_hour % 24 == 0:
+            accumulation_labels.add(f"0-{fcst_hour // 24} day acc fcst")
         # Compile search patterns
         search_exprs = [re.escape(s) for s in search_strings]
         search_pattern = re.compile("|".join(search_exprs))
@@ -718,7 +698,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
                 continue
             if not search_pattern.search(line):
                 continue
-            if accum_str not in line:
+            if not accumulation_labels.intersection(field.strip() for field in line.split(":")):
                 continue
             parts = line.split(':')
             rangestart = int(parts[1])
@@ -852,7 +832,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
     # Download GRIB subset
     with open(local_filename, 'wb') as f_out:
         for byteRange in matched_ranges.keys():
-            r = requests.get(remote_url, headers={'Range': f'bytes=' + byteRange})
+            r = requests.get(remote_url, headers={'Range': f'bytes=' + byteRange}, timeout=60)
             if r.status_code in (200, 206):
                 f_out.write(r.content)
             else:
@@ -875,52 +855,12 @@ def parse_date_and_time_from_url(remote_url, model):
     elif model == 'hrrr':
         return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     elif model == 'rrfs':
-        return url_parts[-3].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
+        return re.search(r'rrfs(?:ens)?\.(\d{8})/', remote_url).group(1), url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     elif model == 'urma':
         return url_parts[-2].split('.')[-1], url_parts[-1].split('.')[1].replace('t', '').replace('z', '')
     else:
         raise ValueError(f"Unsupported date/time header parsing for model: {model} with url parts {url_parts}")
 
-
-def add_interval_precip_from_total(
-        df,
-        *,
-        total_col="precip_accum",                  
-        out_col="precip_6h",        
-        hours=6,                    
-        group_cols=("station_id", "init_time"),
-        clip_negative_to_zero=True  
-    ):
-        """
-        Compute interval precipitation as the difference between the cumulative
-        total at t and the cumulative total exactly 'hours' earlier, per station/run.
-
-        Only rows that have an exact prior timestamp (t - hours) in the same group
-        will receive a value; others remain NaN.
-        """
-        if total_col not in df.columns:
-            raise KeyError(f"'{total_col}' not found in DataFrame columns")
-
-        def _per_group(g):
-            g = g.sort_values("valid_time").copy()
-            # exact match target for previous cumulative value
-            g["_target_time"] = g["valid_time"] - pd.Timedelta(hours=hours)
-            prev = g[["valid_time", total_col]].rename(
-                columns={"valid_time": "_target_time", total_col: "_prev_total"}
-            )
-            g = g.merge(prev, on="_target_time", how="left")
-            g[out_col] = round((g[total_col] - g["_prev_total"]),2)
-            # handle resets/noise
-            if clip_negative_to_zero:
-                g[out_col] = g[out_col].where(g[out_col] >= 0, 0.0)
-            g.drop(columns=["_target_time", "_prev_total"], inplace=True)
-            return g
-
-        return (
-            df.groupby(list(group_cols), group_keys=False, sort=False)
-            .apply(_per_group)
-            .reset_index(drop=True)
-        )
 
 def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
     rename_map = config.HERBIE_RENAME_MAP[element][model]
@@ -1155,7 +1095,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 if grib_var not in ds:
                                     continue
                                 val = MM_to_IN(ds[grib_var].values[iy, ix])
-                                record[renamed_var] = round(float(val), 2)
+                                record[renamed_var] = float(val)
 
                             all_records.append(record)   
                         elif element == 'snow6hr':
@@ -1163,8 +1103,15 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 if grib_var not in ds:
                                     continue
                                 val = M_to_IN(ds[grib_var].values[iy, ix])
-                                record[renamed_var] = round(float(val), 1)
+                                record[renamed_var] = float(val)
 
+                            all_records.append(record)
+                        elif element == 'temp2m':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                kelvin = ds[grib_var].values[iy, ix]
+                                record[renamed_var] = round(float((kelvin - 273.15) * 1.8 + 32), 2)
                             all_records.append(record)
                         elif element == 'rh':
                             for grib_var, renamed_var in rename_map.items():
@@ -1206,7 +1153,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 if grib_var not in ds:
                                     continue
                                 val = MM_to_IN(ds[grib_var].values[iy, ix])
-                                record[renamed_var] = round(float(val), 2)
+                                record[renamed_var] = float(val)
 
                             all_records.append(record)   
                         elif element == 'snow6hr':
@@ -1214,8 +1161,15 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 if grib_var not in ds:
                                     continue
                                 val = M_to_IN(ds[grib_var].values[iy, ix])
-                                record[renamed_var] = round(float(val), 1)
+                                record[renamed_var] = float(val)
 
+                            all_records.append(record)
+                        elif element == 'temp2m':
+                            for grib_var, renamed_var in rename_map.items():
+                                if grib_var not in ds:
+                                    continue
+                                kelvin = ds[grib_var].values[iy, ix]
+                                record[renamed_var] = round(float((kelvin - 273.15) * 1.8 + 32), 2)
                             all_records.append(record)
                         elif element == 'rh':
                             for grib_var, renamed_var in rename_map.items():

@@ -37,7 +37,7 @@ class Archiver(ABC):
 
 
 
-    def write_to_s3(self, df, s3_path, profile="default", region="us-east-2"):
+    def write_to_s3(self, df, s3_path, profile="default", region="us-east-2", dedup_columns=None):
         try:
             fs = fsspec.filesystem("s3", profile=profile, client_kwargs={"region_name": region})
             
@@ -47,7 +47,7 @@ class Archiver(ABC):
                     existing_df = pd.read_parquet(f)
 
                 # Concatenate and drop duplicates if needed (optional)
-                combined_df = pd.concat([existing_df, df], ignore_index=True).drop_duplicates()
+                combined_df = pd.concat([existing_df, df], ignore_index=True).drop_duplicates(subset=dedup_columns, keep="last")
 
                 with fs.open(s3_path, "wb") as f:
                     combined_df.to_parquet(f, index=False)
@@ -80,7 +80,7 @@ class Archiver(ABC):
                 existing_df = pd.read_parquet(local_path)
                 combined_df = pd.concat([existing_df, df], ignore_index=True)
                 if dedup_columns:
-                    combined_df = combined_df.drop_duplicates(subset=dedup_columns)
+                    combined_df = combined_df.drop_duplicates(subset=dedup_columns, keep="last")
                 else:
                     combined_df = combined_df.drop_duplicates()
             else:
