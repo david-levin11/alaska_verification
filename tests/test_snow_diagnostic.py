@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 import unittest
 sys.path.insert(0,str(Path(__file__).parents[1]))
-from diagnose_hrrr_snow import select_record,compare_bounds
+from diagnose_hrrr_snow import select_record,compare_bounds,resolve_units
 
 class DiagnosticTests(unittest.TestCase):
     def test_exact_period(self):
@@ -13,6 +13,12 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(select_record(line,24)[1:],(0,None))
         with self.assertRaises(ValueError): select_record(line+'\n'+line,24)
         with self.assertRaises(ValueError): select_record(line,6)
+    def test_unknown_units_require_explicit_assumption(self):
+        self.assertIn('Decoded',resolve_units('m'))
+        with self.assertRaises(ValueError): resolve_units('unknown')
+        self.assertIn('ASSUMED',resolve_units('unknown',True))
+        with self.assertRaises(ValueError): resolve_units('kg m**-2',True)
+
     def test_bounds(self):
         self.assertTrue(compare_bounds(-.00001,{'packingError':.000006},{'packingError':.000006})['within_reported_packing_error'])
         self.assertFalse(compare_bounds(-.001,{'packingError':.000006},{'packingError':.000006})['within_reported_packing_error'])

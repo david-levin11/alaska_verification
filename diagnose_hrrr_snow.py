@@ -48,7 +48,7 @@ def metadata(message):
     for key in ['name','shortName','units','typeOfLevel','level','stepType','startStep','endStep',
                 'stepUnits','stepRange','dataDate','dataTime','validityDate','validityTime',
                 'packingType','bitsPerValue','binaryScaleFactor','decimalScaleFactor',
-                'referenceValue','packingError','unpackedError','numberOfMissing','gridType','Ni','Nj']:
+                'referenceValue','discipline','parameterCategory','parameterNumber','centre','tablesVersion','localTablesVersion','packingError','unpackedError','numberOfMissing','gridType','Ni','Nj']:
         try:
             value=message[key]
             if hasattr(value,'item'): value=value.item()
@@ -56,6 +56,15 @@ def metadata(message):
         except Exception:
             result[key]=None
     return result
+
+
+def resolve_units(units, assume_meters=False):
+    if units == 'm':
+        return 'Decoded GRIB units: meters'
+    if units in (None, 'unknown', 'undef') and assume_meters:
+        return 'ASSUMED meters via --assume-asnow-meters for exact ASNOW index record; decoder units unresolved'
+    raise ValueError(f'Unresolved/unexpected ASNOW units: {units!r}. '
+                     'For unknown units only, use --assume-asnow-meters to explicitly apply the archiver meter convention.')
 
 
 def compare_bounds(difference,first,second):
@@ -95,8 +104,9 @@ def run(args,directory):
             if gribs.messages!=1: raise ValueError(f'Expected one GRIB message in {path}')
             message=gribs.message(1);info=metadata(message)
             if (info['stepType']!='accum' or info['startStep']!=0 or info['endStep']!=lead
-                    or str(info['stepUnits']) not in ('1','h') or info['units']!='m'):
+                    or str(info['stepUnits']) not in ('1','h')):
                 raise ValueError(f'Unexpected decoded accumulation metadata: {info}')
+            record['unit_interpretation']=resolve_units(info['units'],args.assume_asnow_meters)
             if info['dataDate']!=int(cycle.strftime('%Y%m%d')) or info['dataTime']!=cycle.hour*100:
                 raise ValueError('GRIB initialization does not match requested cycle')
             valid=cycle+timedelta(hours=lead)
@@ -136,6 +146,8 @@ def main():
     p.add_argument('--station',default='PAJN')
     p.add_argument('--metadata',default='obs/alaska_all_active_synoptic_station_metadata.csv')
     p.add_argument('--latitude',type=float);p.add_argument('--longitude',type=float)
+    p.add_argument('--assume-asnow-meters',action='store_true',
+                   help='Explicitly interpret unknown ASNOW units as meters; recorded in report')
     p.add_argument('--radius',type=int,default=1,help='Neighborhood radius in cells (default 3x3)')
     p.add_argument('--base-url',default='https://noaa-hrrr-bdp-pds.s3.amazonaws.com')
     p.add_argument('--output-dir',default='snow_diagnostics')

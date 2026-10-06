@@ -29,3 +29,17 @@ are null. The combined reported packing errors provide a consistency check only;
 they do not quantify all model numerical effects or prove why totals decreased.
 No validation tolerance is changed. No live GRIB download was performed during
 implementation; automated tests cover index selection and packing-bound handling.
+
+
+If your decoder labels the NCEP ASNOW parameter name/units as `unknown`, rerun:
+
+```bash
+python diagnose_hrrr_snow.py --assume-asnow-meters
+```
+
+This explicit option uses the archiver's ASNOW meter convention for unresolved
+units only. The report preserves the decoder's original units and labels the
+assumption per record, with numeric parameter/table identifiers for further
+investigation. Known incompatible units still fail. Accumulation windows and
+source timestamps remain strictly checked. Packing-error metadata may still be
+unavailable; the report does not substitute a guessed error bound.
