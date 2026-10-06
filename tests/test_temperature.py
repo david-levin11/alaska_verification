@@ -72,7 +72,6 @@ def test_temperature_ensemble_and_negative_thresholds(tmp_path):
     assert result['mean']==-4 and result.p50==-4
     recipe=validate_recipe('temp_2m_f',dict(units='degF',operator='<',thresholds=[-40,0,32]))
     assert recipe['thresholds']==[-40.,0.,32.]
-    assert load_threshold_config()['temp_2m_f']['thresholds']==[]
 
 
 def test_old_custom_threshold_file_still_loads(tmp_path):

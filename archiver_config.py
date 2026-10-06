@@ -135,6 +135,7 @@ HERBIE_FORECASTS = {
             'Wind': list(range(3,168,3)),
             'Gust': list(range(3,168,3))
         },
+        # Keep f003 cumulative endpoints: f009 six-hour totals need f009 - f003.
 		'hrrr':{
             'Wind': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
             'rh': [3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
