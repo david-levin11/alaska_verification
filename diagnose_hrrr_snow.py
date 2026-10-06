@@ -1,4 +1,4 @@
-"""Read-only HRRR ASNOW diagnostic; downloads exact cumulative GRIB records."""
+"""Read-only HRRR ASNOW/APCP diagnostic; downloads exact cumulative GRIB records."""
 import argparse
 import json
 from datetime import datetime, timedelta
@@ -6,7 +6,7 @@ from pathlib import Path
 import uuid
 
 
-def select_record(index, lead):
+def select_record(index, lead, variable='ASNOW'):
     labels={f'0-{lead} hour acc fcst'}
     if lead%24==0:
         labels.add(f'0-{lead//24} day acc fcst')
@@ -14,19 +14,19 @@ def select_record(index, lead):
     matches=[]
     for i,line in enumerate(lines):
         fields=[part.strip() for part in line.split(':')]
-        if len(fields)>5 and fields[3:5]==['ASNOW','surface'] and fields[5] in labels:
+        if len(fields)>5 and fields[3:5]==[variable,'surface'] and fields[5] in labels:
             start=int(fields[1]);end=int(lines[i+1].split(':')[1])-1 if i+1<len(lines) else None
             matches.append((line,start,end))
     if len(matches)!=1:
-        raise ValueError(f'Expected exactly one cumulative ASNOW record at f{lead:03}; found {len(matches)}')
+        raise ValueError(f'Expected exactly one cumulative {variable} record at f{lead:03}; found {len(matches)}')
     return matches[0]
 
 
-def download_record(url,lead,directory):
+def download_record(url,lead,directory,variable='ASNOW'):
     import requests
     response=requests.get(url+'.idx',timeout=60);response.raise_for_status()
     (directory/f'f{lead:03}.idx').write_text(response.text)
-    line,start,end=select_record(response.text,lead)
+    line,start,end=select_record(response.text,lead,variable)
     requested=f'{start}-{end if end is not None else ""}'
     response=requests.get(url,headers={'Range':'bytes='+requested},timeout=120)
     response.raise_for_status()
@@ -39,7 +39,7 @@ def download_record(url,lead,directory):
         raise ValueError('Truncated or incorrect GRIB byte range')
     if not response.content.startswith(b'GRIB'):
         raise ValueError('Downloaded record does not begin with GRIB')
-    path=directory/f'f{lead:03}_asnow.grib2';path.write_bytes(response.content)
+    path=directory/f'f{lead:03}_{variable.lower()}.grib2';path.write_bytes(response.content)
     return path,dict(url=url,index_record=line,byte_range=requested)
 
 
@@ -65,6 +65,15 @@ def resolve_units(units, assume_meters=False):
         return 'ASSUMED meters via --assume-asnow-meters for exact ASNOW index record; decoder units unresolved'
     raise ValueError(f'Unresolved/unexpected ASNOW units: {units!r}. '
                      'For unknown units only, use --assume-asnow-meters to explicitly apply the archiver meter convention.')
+
+
+def precip_units(units):
+    # APCP kg/m^2 is numerically equivalent to mm of liquid-water depth.
+    if units in ('kg m**-2', 'kg m-2', 'kg m^-2', 'kg/m^2', 'mm'):
+        return 'Decoded APCP units equivalent to millimeters of liquid water', 1.0
+    if units == 'm':
+        return 'Decoded precipitation depth in meters; converted to millimeters', 1000.0
+    raise ValueError(f'Unresolved/unexpected APCP units: {units!r}; refusing to assume precipitation units')
 
 
 def compare_bounds(difference,first,second):
@@ -95,24 +104,32 @@ def run(args,directory):
         row=frame[frame[idcol].astype(str).str.strip()==args.station]
         if len(row)!=1: raise ValueError(f'Expected one metadata row for {args.station}, found {len(row)}')
         lat=float(row.iloc[0]['latitude']);lon=float(row.iloc[0]['longitude']);origin=args.metadata
-    arrays=[];grids=[];records=[]
+    variable='APCP' if args.element=='precip' else 'ASNOW'
+    arrays=[];grids=[];records=[];scales=[]
     for lead in args.leads:
         url=(f'{args.base_url.rstrip("/")}/hrrr.{cycle:%Y%m%d}/alaska/'
              f'hrrr.t{cycle:%H}z.wrfsfcf{lead:02}.ak.grib2')
-        path,record=download_record(url,lead,directory)
+        path,record=download_record(url,lead,directory,variable)
         with pygrib.open(str(path)) as gribs:
             if gribs.messages!=1: raise ValueError(f'Expected one GRIB message in {path}')
             message=gribs.message(1);info=metadata(message)
             if (info['stepType']!='accum' or info['startStep']!=0 or info['endStep']!=lead
                     or str(info['stepUnits']) not in ('1','h')):
                 raise ValueError(f'Unexpected decoded accumulation metadata: {info}')
-            record['unit_interpretation']=resolve_units(info['units'],args.assume_asnow_meters)
+            if args.element=='precip':
+                record['unit_interpretation'],scale=precip_units(info['units'])
+            else:
+                record['unit_interpretation']=resolve_units(info['units'],args.assume_asnow_meters)
+                scale=1.0
+            scales.append(scale)
+            record['comparison_units']='mm' if args.element=='precip' else 'm'
+            record['native_to_comparison_factor']=scale
             if info['dataDate']!=int(cycle.strftime('%Y%m%d')) or info['dataTime']!=cycle.hour*100:
                 raise ValueError('GRIB initialization does not match requested cycle')
             valid=cycle+timedelta(hours=lead)
             if info['validityDate']!=int(valid.strftime('%Y%m%d')) or info['validityTime']!=valid.hour*100:
                 raise ValueError('GRIB valid time does not match requested lead')
-            arrays.append(np.ma.asarray(message.values,dtype=float).filled(np.nan))
+            arrays.append(np.ma.asarray(message.values,dtype=float).filled(np.nan)*scale)
             grids.append(message.latlons());record['metadata']=info;records.append(record)
     if arrays[0].shape!=arrays[1].shape or any(not np.allclose(a,b,equal_nan=True) for a,b in zip(grids[0],grids[1])):
         raise ValueError('Source grids differ; comparison aborted')
@@ -126,21 +143,39 @@ def run(args,directory):
                 longitude=float(grids[0][1][y,x]),first_m=float(arrays[0][y,x]),
                 second_m=float(arrays[1][y,x]),difference_m=float(difference[y,x])))
     finite=difference[np.isfinite(difference)];negative=finite[finite<0]
-    report=dict(station=args.station,station_latitude=lat,station_longitude=lon,coordinate_source=origin,
+    inch_factor=1/25.4 if args.element=='precip' else 39.3701
+    bound_metadata=[]
+    for record,scale in zip(records,scales):
+        info=dict(record['metadata'])
+        if isinstance(info.get('packingError'),(int,float)):
+            info['packingError']*=scale
+        bound_metadata.append(info)
+    report=dict(element=args.element,variable=variable,comparison_units='mm' if args.element=='precip' else 'm',station=args.station,station_latitude=lat,station_longitude=lon,coordinate_source=origin,
         cycle=cycle.isoformat(),leads=args.leads,grid_index=[iy,ix],records=records,
         point=dict(first_m=float(arrays[0][iy,ix]),second_m=float(arrays[1][iy,ix]),difference_m=point,
-                   first_inches=float(arrays[0][iy,ix])*39.3701,second_inches=float(arrays[1][iy,ix])*39.3701,
-                   difference_inches=point*39.3701),
-        precision=compare_bounds(point,records[0]['metadata'],records[1]['metadata']),
+                   first_inches=float(arrays[0][iy,ix])*inch_factor,second_inches=float(arrays[1][iy,ix])*inch_factor,
+                   difference_inches=point*inch_factor),
+        precision=compare_bounds(point,*bound_metadata),
         grid_summary=dict(finite_cells=int(finite.size),negative_cells=int(negative.size),
                           minimum_difference_m=float(finite.min()),maximum_difference_m=float(finite.max())),
         neighborhood=neighborhood,
         scope='Source GRIB comparison only. Does not alter archives or establish model numerical precision.')
+    report['point']['first_native']=float(arrays[0][iy,ix])/scales[0]
+    report['point']['second_native']=float(arrays[1][iy,ix])/scales[1]
+    if args.element=='precip':
+        # Preserve legacy snow keys, but never label precipitation mm as meters.
+        def rename_units(value):
+            if isinstance(value,dict):
+                return {(k[:-2]+'_mm' if k.endswith('_m') else k):rename_units(v) for k,v in value.items()}
+            if isinstance(value,list): return [rename_units(v) for v in value]
+            return value
+        report=rename_units(report)
     return report
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--element',choices=['snow','precip'],default='snow')
     p.add_argument('--cycle',default='2026100412',help='UTC YYYYMMDDHH')
     p.add_argument('--leads',nargs=2,type=int,default=[6,12])
     p.add_argument('--station',default='PAJN')
@@ -152,10 +187,12 @@ def main():
     p.add_argument('--base-url',default='https://noaa-hrrr-bdp-pds.s3.amazonaws.com')
     p.add_argument('--output-dir',default='snow_diagnostics')
     args=p.parse_args()
+    if args.element=='precip' and args.assume_asnow_meters:
+        p.error('--assume-asnow-meters applies only to snow')
     if (args.latitude is None)!=(args.longitude is None): p.error('Supply both latitude and longitude')
     if args.leads[0]<0 or args.leads[1]-args.leads[0]!=6: p.error('Leads must be nonnegative and six hours apart')
     if not 0<=args.radius<=10: p.error('Radius must be between 0 and 10')
-    directory=Path(args.output_dir)/('hrrr-snow-'+uuid.uuid4().hex[:12]);directory.mkdir(parents=True)
+    directory=Path(args.output_dir)/('hrrr-'+args.element+'-'+uuid.uuid4().hex[:12]);directory.mkdir(parents=True)
     try:
         report=run(args,directory)
         # Strict JSON: missing grid points appear as null.

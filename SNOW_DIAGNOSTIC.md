@@ -43,3 +43,27 @@ assumption per record, with numeric parameter/table identifiers for further
 investigation. Known incompatible units still fail. Accumulation windows and
 source timestamps remain strictly checked. Packing-error metadata may still be
 unavailable; the report does not substitute a guessed error bound.
+
+
+## Precipitation packing diagnostic
+
+The same script now accepts `--element precip` to select cumulative APCP. For
+PAJN's October 1 00Z f018/f024 decrease:
+
+```bash
+python diagnose_hrrr_snow.py --element precip --cycle 2026100100 --leads 18 24 --station PAJN --output-dir precip_diagnostics
+```
+
+APCP decoded in kg/m² is numerically equivalent to millimeters of liquid water;
+`mm` is accepted directly, while decoded `m` is converted to mm. Unknown or
+incompatible precipitation units are rejected. The snow-only assumption flag is
+not accepted for precipitation. The report preserves native endpoint values and
+original packing metadata, and labels comparison values as mm (including point,
+neighborhood, and full-grid differences). Inch conversions use mm / 25.4.
+Reported packing errors are converted to comparison units before combining them.
+No bound is guessed when the decoder does not expose packingError.
+
+Exact index matching accepts 0–24 hours or 0–1 day, while excluding one-hour
+APCP records. Downloads go into a unique `hrrr-precip-*` subdirectory. Attach
+report.txt from the printed directory. Existing snow commands/defaults and snow
+report meter fields are preserved. Archives and validation tolerances are unchanged.
