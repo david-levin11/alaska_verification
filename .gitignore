@@ -11,6 +11,11 @@ nbm_exp/
 nbmqmd/
 nbmqmd_exp/
 ndfd/
+derived/
+precip_diagnostics/
+snow_diagnostics/
+validation_output/
+*_validation*
 archive*
 logs/
 Wind*
