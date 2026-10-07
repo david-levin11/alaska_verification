@@ -10,7 +10,6 @@ nbm/
 nbm_exp/
 nbmqmd/
 nbmqmd_exp/
-ndfd/
 archive*
 logs/
 Wind*
@@ -18,8 +17,22 @@ test*
 obs_metadata*
 oryx*
 *.csv
+*.parquet
 download_nbm_yearly.py
 obs_stations_active.txt
 streamlit*
 app_config.yaml
 settings.json
+maxt*
+mint*
+Gust_obs*
+ndfd/
+derived/
+validation_output/
+snow_diagnostics/
+rh_validation*
+*validation.json
+precip_diagnostics/
+# Keep automated regression tests despite the legacy test* exclusion.
+!tests/
+!tests/test_*.py
