@@ -49,7 +49,6 @@ class NDFDArchiver(Archiver):
                 self.config.API_KEY,
                 self.config.STATE,
                 self.config.NETWORK,
-                self.start,  # ✅ Use dynamic start date
             )
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)
