@@ -1,7 +1,7 @@
 from archiver_base import Archiver
-from utils import create_wind_metadata, create_precip_metadata, parse_metadata, get_model_file_list, extract_model_subset_parallel
-from pathlib import Path
+from utils import create_wind_metadata, create_precip_metadata, create_all_station_metadata, parse_metadata, get_model_file_list, extract_model_subset_parallel
 import pandas as pd
+from pathlib import Path
 import archiver_config as config
 
 class ModelArchiver(Archiver):
@@ -9,72 +9,129 @@ class ModelArchiver(Archiver):
         super().__init__(config)
         self.start = start or config.OBS_START  # default fallback
         self.wxelement = wxelement or config.ELEMENT
-        if self.wxelement in ["precip24hr", "precip6hr", "snow6hr", "snow24hr", "snow48hr", "snow72hr"]:
-            self.station_df = self.ensure_metadata_precip()
-        else:
-            self.station_df = self.ensure_metadata()
-            self.station_df.to_csv(f"{self.wxelement}_obs_sites.csv")
 
-    def ensure_metadata(self):
-        print(f"Creating metadata for {self.wxelement}")
-        metadata = f'alaska_{self.wxelement}_obs_metadata.csv'
+        # Model extraction should use all active regional Synoptic stations,
+        # regardless of whether they report the requested observed variable.
+        self.station_df = self.ensure_model_metadata()
+
+        self.station_df.to_csv(
+            Path(self.config.OBS) / f"{self.config.MODEL}_{self.wxelement}_model_sites.csv",
+            index=False,
+        )
+
+    def ensure_model_metadata(self):
+        """
+        Create/load all-active regional Synoptic station metadata for model extraction.
+
+        This metadata is intentionally not element-specific. The model archive
+        should contain point forecasts for the full station universe. The obs
+        archiver can later restrict to stations that actually report each
+        observed element.
+        """
+
+        metadata = f"{self.config.REGION}_all_active_synoptic_station_metadata.csv"
         meta_path = Path(self.config.OBS) / metadata
-        if self.wxelement == "Gust":
-            meta_element = self.config.OBS_VARS['Wind']
-        else:
-            meta_element = self.config.OBS_VARS[self.wxelement]
+
         if not meta_path.exists():
-            print(f"Creating metadata from {self.config.METADATA_URL}")
-            meta_json = create_wind_metadata(
-                self.config.METADATA_URL,
-                self.config.API_KEY,
-                self.config.STATE,
-                meta_element
+            if not self.config.API_KEY:
+                raise ValueError("Set SYNOPTIC_API_KEY before requesting station metadata")
+            print(f"Creating all-active regional Synoptic metadata from {self.config.METADATA_URL}")
+
+            meta_json = create_all_station_metadata(
+                url=self.config.METADATA_URL,
+                token=self.config.API_KEY,
+                state=self.config.STATE,
+                status="active",
+                networks=None,
             )
+
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)
+
         else:
+            print(f"Loading all-active regional Synoptic metadata from {meta_path}")
             meta_df = pd.read_csv(meta_path)
+
+        self._print_station_metadata_summary(meta_df)
+
         return meta_df
 
-    def ensure_metadata_precip(self):
-        print(f"Creating metadata for {self.wxelement}")
-        metadata = f'alaska_{self.wxelement}_obs_metadata.csv'
-        meta_path = Path(self.config.OBS) / metadata
-        if not meta_path.exists():
-            print(f"Creating metadata from {self.config.METADATA_URL}")
-            meta_json = create_precip_metadata(
-                self.config.METADATA_URL,
-                self.config.API_KEY,
-                self.config.STATE,
-                self.config.NETWORK
-            )
-            meta_df = parse_metadata(meta_json)
-            meta_df.to_csv(meta_path, index=False)
-        else:
-            meta_df = pd.read_csv(meta_path)
-        return meta_df
+    def _print_station_metadata_summary(self, meta_df):
+        station_col = None
+
+        for candidate in ["stid", "station_id", "STID"]:
+            if candidate in meta_df.columns:
+                station_col = candidate
+                break
+
+        print(f"Model metadata rows: {len(meta_df):,}")
+        print(f"Model metadata columns: {meta_df.columns.tolist()}")
+
+        if station_col is None:
+            print("WARNING: Could not find a station ID column in model metadata.")
+            return
+
+        station_ids = meta_df[station_col].astype(str).str.strip()
+
+        print(f"Unique model extraction stations: {station_ids.nunique():,}")
+
+        check_stations = ["PHNL", "PHOG", "PHTO"] if self.config.REGION == "hawaii" else [
+            "ABYA2",
+            "NDBCABYA2",
+            "KTNA2",
+            "COOPKTNA2",
+            "PAJN",
+        ]
+
+        print("Check stations in model extraction metadata:")
+        for stid in check_stations:
+            print(f"  {stid}: {(station_ids == stid).any()}")
 
     def fetch_file_list(self, start, end):
+        if self.config.MODEL == "rrfsens":
+            return {member: get_model_file_list(
+                start=start, end=end,
+                fcst_hours=self.config.HERBIE_FORECASTS["rrfsens"][self.wxelement],
+                cycle=self.config.HERBIE_CYCLES["rrfsens"],
+                base_url=self.config.MODEL_URLS["rrfsens"],
+                element=self.wxelement, model="rrfs",
+                domain=self.config.HERBIE_DOMAIN, member_id=member,
+            ) for member in self.config.RRFS_MEMBERS}
         return get_model_file_list(
             start=start,
             end=end,
             fcst_hours=self.config.HERBIE_FORECASTS[self.config.MODEL][self.wxelement],
             cycle=self.config.HERBIE_CYCLES[self.config.MODEL],
             base_url=self.config.MODEL_URLS[self.config.MODEL],
-            element = self.config.ELEMENT,
+            element=self.wxelement,
             model=self.config.MODEL,
-            domain=self.config.HERBIE_DOMAIN
+            domain=self.config.HERBIE_DOMAIN,
         )
 
     def process_files(self, file_urls):
+        if self.config.MODEL == "rrfsens":
+            frames = []
+            for member, urls in file_urls.items():
+                if not urls:
+                    continue
+                # Reuse deterministic RRFS extraction; difference within each member.
+                frame = extract_model_subset_parallel(
+                    file_urls=urls, station_df=self.station_df,
+                    search_strings=self.config.HERBIE_XARRAY_STRINGS[self.wxelement]["rrfs"],
+                    element=self.wxelement, model="rrfs", config=self.config,
+                )
+                if not frame.empty:
+                    frame["member_id"] = member
+                    frames.append(frame)
+            return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        #print(self.config.HERBIE_XARRAY_STRINGS[self.config.ELEMENT])
         return extract_model_subset_parallel(
             file_urls=file_urls,
             station_df=self.station_df,
-            search_strings=self.config.HERBIE_XARRAY_STRINGS[self.config.ELEMENT][self.config.MODEL],
-            element=self.config.ELEMENT,
+            search_strings=self.config.HERBIE_XARRAY_STRINGS[self.wxelement][self.config.MODEL],
+            element=self.wxelement,
             model=self.config.MODEL,
-            config=self.config
+            config=self.config,
         )
 
 if __name__ == "__main__":
@@ -82,5 +139,5 @@ if __name__ == "__main__":
     files = archiver.fetch_file_list("2025-01-30 01:00:00", "2025-01-31 01:00:00")
     print(files)
     df = archiver.process_files(files)
-    print(f'Dataframe is: {df[df['station_id']=='PAJN'].head(50)}')
+    print(f"Dataframe is: {df[df['station_id']=='PAJN'].head(50)}")
     df.to_csv("test.csv")

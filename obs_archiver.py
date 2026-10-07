@@ -221,10 +221,11 @@ class ObsArchiver(Archiver):
                         "output": "json",
                         "hfmetars": self.hfmetar,
                     }
+                    
                     r = requests.get(self.url, params=params, timeout=60)
                     r.raise_for_status()
                     js = r.json()
-
+                    
                     # --- flatten minimal time series
                     rows = []
                     for st in js.get("STATION", []):
@@ -446,9 +447,12 @@ class ObsArchiver(Archiver):
                         "obtimezone": "utc",
                         "output": "json"
                     }
+                    #print(f"URL is : {self.url}")
+                    #print(f"Params are {params}")
                     r = requests.get(self.url, params=params)
                     r.raise_for_status()
                     obs_json = r.json()
+                    #print(obs_json)
                     df = self.process_obs_data(obs_json["STATION"])
                     if isinstance(df, pd.DataFrame):
                         all_obs.append(df)
@@ -525,6 +529,8 @@ if __name__ == "__main__":
     elif config.ELEMENT == "precip6hr":
         df_obs = obs_archiver.fetch_precip_rolling(stations, config.OBS_START, config.OBS_END, accum_hours=6, step_hours=6)
     elif config.ELEMENT == "Wind":
+        df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
+    elif config.ELEMENT == "rh":
         df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
     elif config.ELEMENT == "maxt":
         df_obs = obs_archiver.fetch_tmax_12to06_timeseries(

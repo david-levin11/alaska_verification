@@ -12,9 +12,11 @@ import sys
 os.makedirs(config.TMP, exist_ok=True)
 tempfile.tempdir = config.TMP
 
-def run_monthly_archiving(start, end, element, use_local):
+def run_monthly_archiving(start, end, element, use_local, region='alaska'):
+    config.configure_region(region)
+    tempfile.tempdir = config.TMP
     # Normalize element (e.g., wind → Wind)
-    if element.lower() == "wind" or element.lower == "gust":
+    if element.lower() == "wind" or element.lower() == "gust":
         element = element.capitalize()  # "wind" → "Wind", etc.
 
     if element not in config.NDFD_FILE_STRINGS:
@@ -39,7 +41,10 @@ def run_monthly_archiving(start, end, element, use_local):
         filtered_files = archiver.fetch_file_list(current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
         #print(filtered_files)
         #sys.exit(1)
+        #print(f"NDFD file strings are {[k for k in config.NDFD_FILE_STRINGS]}")
         file_key = config.NDFD_FILE_STRINGS[element][0]
+        #print(f"File key is {file_key}")
+        #print(f"Filteres files are: {filtered_files}")
         if not filtered_files[file_key]:
             print(f"⚠️ No data for {current} to {chunk_end}")
         else:
@@ -48,7 +53,7 @@ def run_monthly_archiving(start, end, element, use_local):
             filename = f"{current.year}_{current.month:02d}_ndfd_{element.lower()}_archive.parquet"
 
             if config.USE_CLOUD_STORAGE:
-                s3_url = f"{config.S3_URLS["ndfd"]}{filename}"
+                s3_url = f"{config.S3_URLS['ndfd']}{filename}"
                 archiver.write_to_s3(df, s3_url)
             else:
                 local_path = os.path.join(config.NDFD_DIR, element.lower(), filename)
@@ -67,8 +72,9 @@ if __name__ == "__main__":
     parser.add_argument("--element", required=True, help="Forecast element (e.g. Wind, Gust)")
     parser.add_argument("--local", action="store_true", help="Write output locally instead of to S3")
 
+    parser.add_argument("--region", choices=["alaska", "hawaii", "ak", "hi"], default="alaska")
     args = parser.parse_args()
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
 
-    run_monthly_archiving(start, end, args.element, args.local)
+    run_monthly_archiving(start, end, args.element, args.local, args.region)

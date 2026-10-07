@@ -3,6 +3,7 @@ import tempfile
 from model_archiver import ModelArchiver
 import archiver_config as config
 import pandas as pd
+from pathlib import Path
 from dateutil.relativedelta import relativedelta
 import shutil
 import os
@@ -13,7 +14,9 @@ from calendar import monthrange
 os.makedirs(config.TMP, exist_ok=True)
 tempfile.tempdir = config.TMP
 
-def run_monthly_archiving(start, end, model_name, element, use_local):
+def run_monthly_archiving(start, end, model_name, element, use_local, region='alaska'):
+    config.configure_region(region)
+    tempfile.tempdir = config.TMP
 
     # Normalize to match config keys
     model = model_name.lower()
@@ -42,12 +45,27 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
     else:
         config.USE_CLOUD_STORAGE = True
 
-    config.MODEL = model_name
+    config.MODEL = model
     config.ELEMENT = element
-    archiver = ModelArchiver(config, start=start.strftime("%Y%m%d%H%M")) 
+
+    if start > end:
+        raise ValueError("start must not be after end")
+    if model in ["rrfs", "rrfsens", "hrrr"] and (
+        start.hour % 6 or start.minute or start.second or start.microsecond
+    ):
+        raise ValueError("Start must be a 00/06/12/18 UTC cycle")
+
+    archiver = ModelArchiver(
+        config,
+        start=start.strftime("%Y%m%d%H%M"),
+        wxelement=element,
+    )
     current = start
     while current <= end:
-        if model in ['nbmqmd', 'nbmqmd_exp']:
+        if model == 'rrfsens':
+            month_end = current.normalize() + pd.offsets.MonthBegin(1)
+            chunk_end = min(current + pd.Timedelta(days=1), month_end) - pd.Timedelta(minutes=1)
+        elif model in ['nbmqmd', 'nbmqmd_exp']:
             # Get the last day of the current month
             last_day = monthrange(current.year, current.month)[1]
             month_end = current.replace(day=last_day, hour=23, minute=59)
@@ -55,7 +73,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
             # Try to go 10 days ahead, but cap it at the end of the current month
             chunk_end = min(current + pd.Timedelta(days=10) - pd.Timedelta(minutes=1), month_end)
         else:
-            chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+            chunk_end = current.normalize() + pd.offsets.MonthBegin(1) - pd.Timedelta(minutes=1)
 
         if chunk_end > end:
             chunk_end = end
@@ -67,14 +85,17 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
             print("⚠️ No files found for this chunk.")
         else:
             df = archiver.process_files(file_urls)
-            #print(f'Dataframe is: {df[df['station_id']=='ERXA2'].head(10)}')
+            #print(f'Dataframe is: {df.head(10)}')
             #df.to_csv('test.csv')
             if df.empty:
                 print("⚠️ No data extracted for this chunk.")
             else:
+                dedup_columns = ["station_id", "init_time", "valid_time", "forecast_hour"]
+                if "member_id" in df.columns:
+                    dedup_columns.append("member_id")
                 if config.USE_CLOUD_STORAGE:
                     s3_path = f"{config.S3_URLS[config.MODEL]}{current.year}_{current.month:02d}_{model}_{element.lower()}_archive.parquet"
-                    archiver.write_to_s3(df, s3_path)
+                    archiver.write_to_s3(df, s3_path, dedup_columns=dedup_columns)
                 else:
                     local_path = os.path.join(
                         config.MODEL_DIR,
@@ -82,16 +103,18 @@ def run_monthly_archiving(start, end, model_name, element, use_local):
                         element.lower(),
                         f"{current.year}_{current.month:02d}_archive.parquet"
                     )
-                    archiver.write_local_output(df, local_path)
+                    archiver.write_local_output(
+                        df,
+                        local_path,
+                        dedup_columns=dedup_columns,
+                    )
 
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)
 
-        # Advance to the next chunk
-        if model in ['nbmqmd', 'nbmqmd_exp']:
-            current = chunk_end + pd.Timedelta(minutes=1)
-        else:
-            current += relativedelta(months=1)
+        # Keep cycle alignment across calendar month boundaries.
+        cycle = pd.Timedelta(config.HERBIE_CYCLES[model])
+        current = current + ((chunk_end - current) // cycle + 1) * cycle
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Model Archiver")
@@ -105,9 +128,10 @@ if __name__ == "__main__":
         help="If set, store output locally instead of S3 (overrides USE_CLOUD_STORAGE)"
     )
 
+    parser.add_argument("--region", choices=["alaska", "hawaii", "ak", "hi"], default="alaska")
     args = parser.parse_args()
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
     #print(args.element.title())
 
-    run_monthly_archiving(start, end, args.model, args.element, args.local)
+    run_monthly_archiving(start, end, args.model, args.element, args.local, args.region)
