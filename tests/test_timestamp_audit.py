@@ -16,6 +16,11 @@ class TimestampAudit(unittest.TestCase):
         self.assertEqual(list(matching_ranges(idx,'maxt',30,50))[0][1:], (100,199))
         self.assertEqual(list(matching_ranges(idx,'mint',30,50)), [])
 
+    def test_annotated_snow_accumulation(self):
+        idx = '1:0:d=x:ASNOW:surface:5-29 hour acc@(fcst,dt=24 hour),missing=0:50% level\n'
+        self.assertEqual(len(list(matching_ranges(idx,'snow24hr',29,50))),1)
+        self.assertEqual(list(matching_ranges(idx,'snow6hr',29,50)),[])
+
     def test_day_units(self):
         idx = '1:0:d=x:APCP:surface:1-2 day acc fcst:50% level\n'
         self.assertEqual(len(list(matching_ranges(idx,'precip24hr',48,50))),1)

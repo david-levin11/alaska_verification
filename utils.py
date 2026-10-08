@@ -5,6 +5,7 @@ import re
 import tempfile
 import shutil
 import pygrib
+from grib_timestamps import percentile_times
 import numpy as np
 import pandas as pd
 from ensemble_processing import add_interval_precip_from_total
@@ -1217,16 +1218,16 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 except Exception:
                                     pass  # Some messages might not support latlons()
 
-                            # Find first validDate
-                            if valid_time is None and hasattr(g, "validDate"):
-                                valid_time = pd.to_datetime(g.validDate)
-
-                            # Cache percentile fields
+                            # Read timestamps only from the percentile fields being archived.
                             if hasattr(g, "percentileValue"):
+                                reference, endpoint = percentile_times(g, forecast_hour)
+                                if valid_time is not None and (init_time, valid_time) != (reference, endpoint):
+                                    raise ValueError("Percentile messages have inconsistent GRIB timestamps")
+                                init_time, valid_time = reference, endpoint
                                 grib_fields[int(g.percentileValue)] = g.values
 
                     if valid_time is None:
-                        raise ValueError(f"No validDate found in {local_file}")
+                        raise ValueError(f"No percentile timestamps found in {local_file}")
 
                     lats, lons, grid_id = grid_coordinates(lats, lons)
                     # Process all stations
@@ -1244,7 +1245,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
 
                         record = {
                             "station_id": stid,
-                            "init_time": valid_time - pd.to_timedelta(forecast_hour, unit="h"),
+                            "init_time": init_time,
                             "valid_time": valid_time,
                             "forecast_hour": forecast_hour,
                         }

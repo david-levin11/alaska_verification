@@ -40,6 +40,8 @@ def matching_ranges(index, element, lead, percentile):
         for field in parts:
             if duration:
                 m = re.fullmatch(r'(\d+)-(\d+) (hour|day) '+kind+r' fcst', field)
+                if not m and kind == 'acc':
+                    m = re.fullmatch(r'(\d+)-(\d+) (hour|day) acc@\(fcst,dt='+str(duration)+r' hour\),missing=\d+', field)
                 if m:
                     scale = 24 if m[3] == 'day' else 1
                     matched = int(m[2])*scale == lead and (int(m[2])-int(m[1]))*scale == duration
@@ -82,6 +84,13 @@ def assess(message, init, lead, percentile):
         endpoint_source = 'validityDate/validityTime'
     valid = message.validDate
     archived_init = valid - timedelta(hours=lead)
+    from grib_timestamps import percentile_times
+    try:
+        corrected_init, corrected_valid = percentile_times(message, lead)
+        result.update(corrected_init=corrected_init.isoformat(), corrected_valid=corrected_valid.isoformat(),
+                      corrected_matches_metadata=(corrected_init == reference and corrected_valid == endpoint))
+    except ValueError as exc:
+        result.update(corrected_matches_metadata=False, corrected_error=str(exc))
     result.update(reference_time=reference.isoformat(), endpoint=endpoint.isoformat(),
                   endpoint_source=endpoint_source, pygrib_validDate=valid.isoformat(),
                   current_archiver_init=archived_init.isoformat(),
@@ -197,6 +206,7 @@ def main():
     counts = {s:sum(r['status']==s for r in rows) for s in sorted({r['status'] for r in rows})}
     print(json.dumps(counts,indent=2))
     print(f'Report: {out / "report.json"}')
+    print('OFFSET describes the legacy validDate calculation; corrected_matches_metadata tests the fixed decoder.')
     print('NO_MATCH is not a pass; daily fields may not exist at every sampled lead.')
     print('Samples diagnose this decoder, not the provenance or correctness of every historical Parquet row.')
     if any(r['status'] in ('ERROR','AMBIGUOUS','METADATA_MISMATCH','OFFSET') for r in rows):
