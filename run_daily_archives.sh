@@ -9,7 +9,9 @@
 #   ./run_daily_archives.sh 2025-11-02      # run for a specific UTC date
 #   ./run_daily_archives.sh --start 202511010100 --end 202511020000  # override
 #
+# Hawaii: ./run_daily_archives.sh --region hawaii [YYYY-MM-DD]
 # Env:
+#   REGION=alaska        # or hawaii; --region overrides this
 #   DRY_RUN=1
 #   LOG_DIR=/path
 #   MODELS="nbm hrrr"
@@ -21,18 +23,37 @@
 set -Eeuo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+# Accept --region anywhere; REGION is also supported for cron wrappers.
+REGION="${REGION:-alaska}"
+POSITIONAL_ARGS=()
+while (( $# )); do
+  if [[ "$1" == "--region" ]]; then
+    [[ $# -ge 2 ]] || { echo "--region requires alaska or hawaii" >&2; exit 2; }
+    REGION="$2"; shift 2
+  else
+    POSITIONAL_ARGS+=("$1"); shift
+  fi
+done
+set -- "${POSITIONAL_ARGS[@]}"
+case "$REGION" in
+  alaska|ak) REGION=alaska; REGION_PREFIX="" ;;
+  hawaii|hi) REGION=hawaii; REGION_PREFIX="hawaii/" ;;
+  *) echo "Unsupported region: $REGION" >&2; exit 2 ;;
+esac
+REGION_ARGS=(--region "$REGION")
+
 # REFS defaults: retry two UTC days plus the earliest six-hour-lagged source run.
 RUN_REFS="${RUN_REFS:-1}"
 REFS_LOOKBACK_DAYS="${REFS_LOOKBACK_DAYS:-2}"
 SOURCE_STORAGE="${SOURCE_STORAGE:-local}"
-REFS_OUTPUT_ROOT="${REFS_OUTPUT_ROOT:-derived/refs}"
+REFS_OUTPUT_ROOT="${REFS_OUTPUT_ROOT:-${REGION_PREFIX}derived/refs}"
 if [[ ! "$REFS_LOOKBACK_DAYS" =~ ^[1-9][0-9]*$ ]]; then
   echo "REFS_LOOKBACK_DAYS must be a positive integer" >&2; exit 2
 fi
 STORAGE_ARGS=()
 case "$SOURCE_STORAGE" in
-  local) STORAGE_ARGS=(--local); REFS_ARCHIVE_ROOT="${REFS_ARCHIVE_ROOT:-model}" ;;
-  s3) REFS_ARCHIVE_ROOT="${REFS_ARCHIVE_ROOT:-s3://alaska-verification}" ;;
+  local) STORAGE_ARGS=(--local); REFS_ARCHIVE_ROOT="${REFS_ARCHIVE_ROOT:-${REGION_PREFIX}model}" ;;
+  s3) REFS_ARCHIVE_ROOT="${REFS_ARCHIVE_ROOT:-s3://alaska-verification/${REGION_PREFIX}}" ;;
   *) echo "SOURCE_STORAGE must be local or s3" >&2; exit 2 ;;
 esac
 
@@ -50,6 +71,24 @@ DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "precip6hr" "maxt" "mint" "snow6hr")
 
 # OBS elements
 DEFAULT_OBS_ELEMENTS=("Wind" "rh" "precip24hr" "precip6hr" "maxt" "mint")
+
+# Hawaii shares the supported non-snow fields; no HRRR domain exists.
+DEFAULT_REFS_ELEMENTS="Wind rh precip6hr snow6hr temp2m"
+if [[ "$REGION" == "hawaii" ]]; then
+  unset 'AVAILABLE_FIELDS[hrrr]'
+  for model in "${!AVAILABLE_FIELDS[@]}"; do
+    filtered=()
+    for element in ${AVAILABLE_FIELDS[$model]}; do
+      [[ "$element" == snow* ]] || filtered+=("$element")
+    done
+    AVAILABLE_FIELDS[$model]="${filtered[*]}"
+  done
+  DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "precip6hr" "maxt" "mint")
+  DEFAULT_REFS_ELEMENTS="Wind rh precip6hr temp2m"
+  for element in ${REFS_ELEMENTS:-$DEFAULT_REFS_ELEMENTS} ${NDFD_ELEMENTS:-${DEFAULT_NDFD_ELEMENTS[*]}} ${OBS_ELEMENTS:-${DEFAULT_OBS_ELEMENTS[*]}}; do
+    [[ "$element" != snow* ]] || { echo "Snow archiving is disabled for Hawaii" >&2; exit 2; }
+  done
+fi
 
 ts() { date -u +"%Y-%m-%d %H:%M:%S UTC"; }
 log_info()  { echo "[$(ts)] [INFO ] $*"; }
@@ -86,7 +125,7 @@ else
   fi
 fi
 
-LOG_DIR="${LOG_DIR:-./logs}"
+LOG_DIR="${LOG_DIR:-./${REGION_PREFIX}logs}"
 mkdir -p "$LOG_DIR"
 # A monthly Parquet is a read/modify/write object: prevent overlapping cron jobs.
 exec 9>"$LOG_DIR/daily_archives.lock"
@@ -96,7 +135,7 @@ fi
 RUN_STAMP="$(date -u +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/archive_${RUN_STAMP}.log"
 
-log_info "Mode: UTC. Base date: ${BASE_DATE:-explicit}  (log: $LOG_FILE)" | tee -a "$LOG_FILE"
+log_info "Region: ${REGION}. Mode: UTC. Base date: ${BASE_DATE:-explicit}  (log: $LOG_FILE)" | tee -a "$LOG_FILE"
 
 # Allow narrowing the model set
 if [[ -n "${MODELS:-}" ]]; then
@@ -105,6 +144,12 @@ else
   MODEL_LIST=("${!AVAILABLE_FIELDS[@]}")
 fi
 
+# Fail unsupported overrides before any downloads are started.
+for model in "${MODEL_LIST[@]}"; do
+  if [[ -z "${AVAILABLE_FIELDS[$model]+set}" ]]; then
+    log_error "Model '$model' is not supported by the daily wrapper for $REGION"; exit 2
+  fi
+done
 RC=0
 REFS_SOURCE_FAILED=0
 
@@ -141,7 +186,7 @@ for model in "${MODEL_LIST[@]}"; do
       END=$(date -u -d "@$((base_epoch + 64800))" +%Y%m%d%H%M)
     fi
 
-    cmd=( python run_model_archiver.py
+    cmd=( python run_model_archiver.py "${REGION_ARGS[@]}"
           --start "${START}"
           --end "${END}"
           --model "${model}"
@@ -169,8 +214,8 @@ if [[ "$RUN_REFS" == "1" ]]; then
   if [[ "$REFS_SOURCE_FAILED" == "1" ]]; then
     log_error "Skipping REFS statistics because a source archiver failed." | tee -a "$LOG_FILE"
   else
-    read -r -a refs_elements <<< "${REFS_ELEMENTS:-Wind rh precip6hr snow6hr temp2m}"
-    refs_cmd=(python run_refs_processing.py
+    read -r -a refs_elements <<< "${REFS_ELEMENTS:-$DEFAULT_REFS_ELEMENTS}"
+    refs_cmd=(python run_refs_processing.py "${REGION_ARGS[@]}"
               --archive-root "$REFS_ARCHIVE_ROOT" --output-root "$REFS_OUTPUT_ROOT"
               --threshold-config "${REFS_THRESHOLD_CONFIG:-refs_thresholds.json}"
               --elements "${refs_elements[@]}")
@@ -212,7 +257,7 @@ if [[ "$RUN_NDFD" == "1" ]]; then
       NDFD_END="$(date -u -d "${BASE_DATE} +1 day 00:00" +%Y%m%d%H)00"
     fi
 
-    ndfd_cmd=( python run_ndfd_archiver.py
+    ndfd_cmd=( python run_ndfd_archiver.py "${REGION_ARGS[@]}"
                --start "${NDFD_START}"
                --end "${NDFD_END}"
                --element "${element}"
@@ -255,7 +300,7 @@ if [[ "$RUN_OBS" == "1" ]]; then
       OBS_END="$(date -u -d "${BASE_DATE} +1 day 00:00" +%Y%m%d%H)00"
     fi
 
-    obs_cmd=( python run_obs_archiver.py
+    obs_cmd=( python run_obs_archiver.py "${REGION_ARGS[@]}"
               --start "${OBS_START}"
               --end "${OBS_END}"
               --element "${element}"

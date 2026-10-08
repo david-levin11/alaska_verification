@@ -7,7 +7,8 @@ import sys
 import archiver_config as config
 from obs_archiver import ObsArchiver
 
-def run_monthly_obs_archiving(start, end, element, use_local):
+def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
+    config.configure_region(region)
     if element.lower() == "wind":
         element = element.capitalize()  # "wind" → "Wind", etc.
     if element not in config.OBS_VARS:
@@ -23,7 +24,7 @@ def run_monthly_obs_archiving(start, end, element, use_local):
     config.ELEMENT = element
     archiver = ObsArchiver(config)
     stations = archiver.get_station_metadata()
-    with open("obs_stations_active.txt","w") as f:
+    with open(os.path.join(config.OBS, "obs_stations_active.txt"),"w") as f:
         f.write(str(stations))
         f.close()
     current = start
@@ -79,8 +80,9 @@ if __name__ == "__main__":
         help="If set, store output locally instead of S3"
     )
 
+    parser.add_argument("--region", choices=["alaska", "hawaii", "ak", "hi"], default="alaska")
     args = parser.parse_args()
     start = pd.to_datetime(args.start)
     end = pd.to_datetime(args.end)
 
-    run_monthly_obs_archiving(start, end, args.element, args.local)
+    run_monthly_obs_archiving(start, end, args.element, args.local, args.region)

@@ -429,12 +429,11 @@ class ObsArchiver(Archiver):
 
     def fetch_observations(self, station_ids, start_time, end_time):
         all_obs = []
+        requested_count = returned_count = 0
         for chunk in self._chunk_station_ids(station_ids):
-            #if "ERXA2" in chunk or "CSXA2" in chunk:
-            #    print(f"Now processing these stations: {chunk}")
-            attempt = 0
+            requested_count += len(chunk)
             wait = self.initial_wait
-            while attempt < self.max_retries:
+            for attempt in range(self.max_retries):
                 try:
                     params = {
                         "stid": ",".join(chunk),
@@ -447,24 +446,37 @@ class ObsArchiver(Archiver):
                         "obtimezone": "utc",
                         "output": "json"
                     }
-                    #print(f"URL is : {self.url}")
-                    #print(f"Params are {params}")
-                    r = requests.get(self.url, params=params)
+                    r = requests.get(self.url, params=params, timeout=90)
                     r.raise_for_status()
                     obs_json = r.json()
-                    #print(obs_json)
-                    df = self.process_obs_data(obs_json["STATION"])
-                    if isinstance(df, pd.DataFrame):
-                        all_obs.append(df)
-                    else:
-                        print(f"⚠️ Unexpected return type from process_obs_data: {type(df)}")
+                    code = str(obs_json.get("SUMMARY", {}).get("RESPONSE_CODE", ""))
+                    if code == "2":
+                        print("WARNING: No matching stations or access unavailable; "
+                              f"stations={','.join(chunk)}; requested={len(chunk)}, returned=0")
+                        break
+                    # Missing STATION must not silently swallow other API errors.
+                    if code not in ("", "1") or not isinstance(obs_json.get("STATION"), list):
+                        raise ValueError(f"Unexpected Synoptic response (code={code or 'missing'})")
+                    stations = obs_json["STATION"]
+                    df = self.process_obs_data(stations) if stations else pd.DataFrame()
+                    if not isinstance(df, pd.DataFrame):
+                        raise TypeError("process_obs_data must return a DataFrame")
+                    all_obs.append(df)
+                    returned_count += len(stations)
+                    print(f"OBS batch: requested={len(chunk)}, returned={len(stations)}")
                     break
                 except Exception as e:
-                    print(f"Retry {attempt+1}/{self.max_retries} failed: {e}")
-                    attempt += 1
+                    # Exception text can include URLs containing the API token.
+                    print(f"Attempt {attempt+1}/{self.max_retries} failed: {type(e).__name__}")
+                    if attempt + 1 == self.max_retries:
+                        raise RuntimeError(
+                            f"Observation batch failed after {self.max_retries} attempts; "
+                            f"stations={','.join(chunk)}"
+                        ) from None
                     sleep(wait)
                     wait *= 2
-        return pd.concat(all_obs, ignore_index=True)
+        print(f"OBS station counts: requested={requested_count}, returned={returned_count}")
+        return pd.concat(all_obs, ignore_index=True) if all_obs else pd.DataFrame()
 
     def process_obs_data(self, raw_obs_json):
         all_records = []

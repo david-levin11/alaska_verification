@@ -101,7 +101,8 @@ NBM_START_HOURS = {
 
 HERBIE_FORECASTS = {
 		'nbm':{
-            'Wind':list(range(3,168,3)),
+            # 01/07/13/19Z cycles: valid at 00/03/06/.../21Z through seven days.
+            'Wind': list(range(2, 168, 3)),
             'snow24hr': [29,35,41,47,53,59,65,71,83,89,95,101,107,113,119,125,131,137,143,149,155,161],
             'snow48hr': [53,59,65,71,83,89,95,101,107,113,119,125,131,137,143,149,155,161],
             'snow72hr': [83,89,95,101,107,113,119,125,131,137,143,149,155,161],
@@ -640,3 +641,52 @@ HERBIE_FORECASTS["rrfsens"] = {field: list(range(3, 61, 3))
                                for field in AVAILABLE_FIELDS["rrfsens"]}
 HERBIE_CYCLES["rrfsens"] = "6h"
 S3_URLS["rrfsens"] = "s3://alaska-verification/rrfsens/"
+
+# Region selection is explicit at entry points; importing config defaults to Alaska.
+from copy import deepcopy
+from region_config import normalize_region
+
+_REGION_KEYS = ('AVAILABLE_FIELDS', 'HERBIE_FORECASTS', 'HERBIE_PRODUCTS',
+                'HERBIE_MODELS', 'NDFD_DICT', 'NDFD_FILE_STRINGS', 'OBS_VARS',
+                'S3_URLS')
+_ALASKA_CONFIG = {key: deepcopy(globals()[key]) for key in _REGION_KEYS}
+
+
+def configure_region(region='alaska'):
+    """Select paths and supported products without accumulating mutations."""
+    global REGION, STATE, HERBIE_DOMAIN, OBS, MODEL_DIR, TMP, NDFD_DIR
+    global WIND_OBS_FILE, WIND_OBS_FILE_COMPRESSED, NDFD_S3_URL
+    REGION = normalize_region(region)
+    for key, value in _ALASKA_CONFIG.items():
+        globals()[key] = deepcopy(value)
+    STATE = HERBIE_DOMAIN = 'hi' if REGION == 'hawaii' else 'ak'
+    root = os.path.join(HOME, 'hawaii') if REGION == 'hawaii' else HOME
+    OBS = os.path.join(root, 'obs')
+    MODEL_DIR = os.path.join(root, 'model')
+    TMP = os.path.join(root, 'tmp_cache')
+    NDFD_DIR = os.path.join(root, 'ndfd') if REGION == 'hawaii' else 'ndfd'
+    WIND_OBS_FILE = f'{REGION}_{ELEMENT.lower()}_obs.csv'
+    WIND_OBS_FILE_COMPRESSED = f'{REGION}_{ELEMENT.lower()}_obs.parquet'
+    if REGION == 'hawaii':
+        # HRRR has no Hawaii product. Snow is intentionally excluded.
+        AVAILABLE_FIELDS.pop('hrrr', None)
+        for model in AVAILABLE_FIELDS:
+            AVAILABLE_FIELDS[model] = [f for f in AVAILABLE_FIELDS[model] if not f.startswith('snow')]
+        AVAILABLE_FIELDS['nbm'] = ['Wind']  # Other non-snow percentiles use NBMQMD.
+        globals()['HERBIE_MODELS'] = list(AVAILABLE_FIELDS)
+        for model in ('nbm', 'nbm_exp', 'nbmqmd', 'nbmqmd_exp'):
+            HERBIE_PRODUCTS[model] = 'hi'
+        for key in ('NDFD_DICT', 'NDFD_FILE_STRINGS', 'OBS_VARS'):
+            globals()[key] = {k: v for k, v in globals()[key].items() if not k.startswith('snow')}
+        for components in NDFD_DICT.values():
+            for component, prefixes in components.items():
+                components[component] = [p[:2] + 'S' + p[3:] for p in prefixes]
+        for model, url in S3_URLS.items():
+            S3_URLS[model] = url.replace('s3://alaska-verification/', 's3://alaska-verification/hawaii/', 1)
+    NDFD_S3_URL = S3_URLS['ndfd']
+    for directory in (OBS, MODEL_DIR, TMP):
+        os.makedirs(directory, exist_ok=True)
+    return REGION
+
+
+configure_region()

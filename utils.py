@@ -5,6 +5,7 @@ import re
 import tempfile
 import shutil
 import pygrib
+from grib_timestamps import percentile_times
 import numpy as np
 import pandas as pd
 from ensemble_processing import add_interval_precip_from_total
@@ -284,6 +285,8 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     return filtered_files
 
 def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
+    from grid_utils import grid_coordinates, outside_hawaii_grid
+    station_index_cache = {}  # This decoded grid only.
     records = []
     try:
         speed_url = f'simplecache::s3://{speed_file}'
@@ -298,24 +301,27 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                 ds_dir = xr.open_dataset(f_dir.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
 
         lats = ds_speed.latitude.values
-        lons = ds_speed.longitude.values - 360
+        lons = normalize_lons_to_minus180_180(ds_speed.longitude.values)
+        lats, lons, grid_id = grid_coordinates(lats, lons)
         steps = pd.to_timedelta(ds_speed.step.values)
         valid_times = pd.to_datetime(ds_speed.valid_time.values)
 
         spd_key = element_keys[0]
-        speed_array = ds_speed[spd_key].values
-        dir_array = ds_dir[element_keys[1]].values if ds_dir and len(element_keys) > 1 else None
+        speed_array = ds_speed[spd_key].values.reshape((-1,) + lats.shape)
+        dir_array = ds_dir[element_keys[1]].values.reshape((-1,) + lats.shape) if ds_dir and len(element_keys) > 1 else None
 
         for _, row in station_df.iterrows():
             stid = row["stid"]
             lat = row["latitude"]
             lon = row["longitude"]
 
-            if stid in station_index_cache:
-                iy, ix = station_index_cache[stid]
+            if (grid_id, stid, lat, lon) in station_index_cache:
+                iy, ix = station_index_cache[(grid_id, stid, lat, lon)]
             else:
                 iy, ix = ll_to_index(lat, lon, lats, lons)
-                station_index_cache[stid] = (iy, ix)
+                station_index_cache[(grid_id, stid, lat, lon)] = (iy, ix)
+            if getattr(config, 'REGION', 'alaska') == 'hawaii' and outside_hawaii_grid(lat, lon, lats, lons, iy, ix):
+                continue
 
             spd_values = speed_array[:, iy, ix]
             dir_values = dir_array[:, iy, ix] if dir_array is not None else [None] * len(spd_values)
@@ -491,7 +497,10 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
         full_domain = "hawaii"
         rrfs_res = "2p5km"
         rrfs_lev = "2dfld"
-    #base_url = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
+    else:
+        raise ValueError(f"Unsupported model domain: {domain}")
+    if model == "hrrr" and domain == "hi":
+        raise ValueError("HRRR is not available for Hawaii")
     init_times = pd.date_range(start=start, end=end, freq=cycle)
     if model == "nbm":
         designator = "blend"
@@ -523,7 +532,8 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
         init_hour = init.strftime("%H")
         # skipping forecast hours if urma
         if model == 'urma':
-            relative_path = f"{designator}.{init_date}/{designator}.t{int(init_hour):02d}z.2dvaranl_ndfd_3p0.grb2"
+            suffix = "2dvaranl_ndfd.grb2" if domain == "hi" else "2dvaranl_ndfd_3p0.grb2"
+            relative_path = f"{designator}.{init_date}/{designator}.t{int(init_hour):02d}z.{suffix}"
             full_url = f"{base_url}/{relative_path}"
             idx_url = full_url + ".idx"
             try:
@@ -863,6 +873,7 @@ def parse_date_and_time_from_url(remote_url, model):
 
 
 def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
+    from grid_utils import grid_coordinates, outside_hawaii_grid
     rename_map = config.HERBIE_RENAME_MAP[element][model]
     conversion_map = config.HERBIE_UNIT_CONVERSIONS[element].get(model, {})
     print(f"Conversion map is: {conversion_map}")
@@ -1009,6 +1020,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                 #print(f"We are looking at other lons...")
                 #print(f"Lons are: {lons[150,150]}")
                 #tree, grid_shape = build_kdtree(lats, lons)
+                lats, lons, grid_id = grid_coordinates(lats, lons)
                 valid_time = pd.to_datetime(ds.valid_time.values)
                 if model == 'nbm':
                     forecast_hour = int(re.search(r"\.f(\d{3})\.", os.path.basename(local_file)).group(1))
@@ -1036,12 +1048,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                     stid = row["stid"]
                     lat, lon = row["latitude"], row["longitude"]
 
-                    if stid in station_index_cache:
-                            iy, ix = station_index_cache[stid]
+                    if (grid_id, stid, lat, lon) in station_index_cache:
+                            iy, ix = station_index_cache[(grid_id, stid, lat, lon)]
                     else:
                         #iy, ix = query_kdtree(tree, grid_shape, lat, lon)
                         iy, ix = ll_to_index(lat, lon, lats, lons)
-                        station_index_cache[stid] = (iy, ix)
+                        station_index_cache[(grid_id, stid, lat, lon)] = (iy, ix)
+                    if getattr(config, 'REGION', 'alaska') == 'hawaii' and outside_hawaii_grid(lat, lon, lats, lons, iy, ix):
+                        continue
 
                     record = {
                         "station_id": stid,
@@ -1053,7 +1067,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                         for grib_var, renamed_var in rename_map.items():
                             if grib_var not in ds:
                                 continue
-                            val = ds[grib_var].values[iy, ix]
+                            val = ds[grib_var].values.reshape(lats.shape)[iy, ix]
                             factor = conversion_map.get(renamed_var, 1.0)
                             if pd.notnull(val):
                                 if "deg" in renamed_var:
@@ -1070,7 +1084,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = ds[grib_var].values[iy, ix]
+                                val = ds[grib_var].values.reshape(lats.shape)[iy, ix]
                                 factor = conversion_map.get(renamed_var, 1.0)
                                 val = val * factor if pd.notnull(val) else None
 
@@ -1094,7 +1108,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = MM_to_IN(ds[grib_var].values[iy, ix])
+                                val = MM_to_IN(ds[grib_var].values.reshape(lats.shape)[iy, ix])
                                 record[renamed_var] = float(val)
 
                             all_records.append(record)   
@@ -1102,7 +1116,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = M_to_IN(ds[grib_var].values[iy, ix])
+                                val = M_to_IN(ds[grib_var].values.reshape(lats.shape)[iy, ix])
                                 record[renamed_var] = float(val)
 
                             all_records.append(record)
@@ -1110,14 +1124,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                kelvin = ds[grib_var].values[iy, ix]
+                                kelvin = ds[grib_var].values.reshape(lats.shape)[iy, ix]
                                 record[renamed_var] = round(float((kelvin - 273.15) * 1.8 + 32), 2)
                             all_records.append(record)
                         elif element == 'rh':
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = ds[grib_var].values[iy, ix]
+                                val = ds[grib_var].values.reshape(lats.shape)[iy, ix]
                                 record[renamed_var] = round(float(val), 1)
 
                             all_records.append(record)
@@ -1128,7 +1142,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = ds[grib_var].values[iy, ix]
+                                val = ds[grib_var].values.reshape(lats.shape)[iy, ix]
                                 factor = conversion_map.get(renamed_var, 1.0)
                                 val = val * factor if pd.notnull(val) else None
 
@@ -1152,7 +1166,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = MM_to_IN(ds[grib_var].values[iy, ix])
+                                val = MM_to_IN(ds[grib_var].values.reshape(lats.shape)[iy, ix])
                                 record[renamed_var] = float(val)
 
                             all_records.append(record)   
@@ -1160,7 +1174,7 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = M_to_IN(ds[grib_var].values[iy, ix])
+                                val = M_to_IN(ds[grib_var].values.reshape(lats.shape)[iy, ix])
                                 record[renamed_var] = float(val)
 
                             all_records.append(record)
@@ -1168,14 +1182,14 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                kelvin = ds[grib_var].values[iy, ix]
+                                kelvin = ds[grib_var].values.reshape(lats.shape)[iy, ix]
                                 record[renamed_var] = round(float((kelvin - 273.15) * 1.8 + 32), 2)
                             all_records.append(record)
                         elif element == 'rh':
                             for grib_var, renamed_var in rename_map.items():
                                 if grib_var not in ds:
                                     continue
-                                val = ds[grib_var].values[iy, ix]
+                                val = ds[grib_var].values.reshape(lats.shape)[iy, ix]
                                 record[renamed_var] = round(float(val), 1)
 
                             all_records.append(record)              
@@ -1204,52 +1218,55 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                                 except Exception:
                                     pass  # Some messages might not support latlons()
 
-                            # Find first validDate
-                            if valid_time is None and hasattr(g, "validDate"):
-                                valid_time = pd.to_datetime(g.validDate)
-
-                            # Cache percentile fields
+                            # Read timestamps only from the percentile fields being archived.
                             if hasattr(g, "percentileValue"):
+                                reference, endpoint = percentile_times(g, forecast_hour)
+                                if valid_time is not None and (init_time, valid_time) != (reference, endpoint):
+                                    raise ValueError("Percentile messages have inconsistent GRIB timestamps")
+                                init_time, valid_time = reference, endpoint
                                 grib_fields[int(g.percentileValue)] = g.values
 
                     if valid_time is None:
-                        raise ValueError(f"No validDate found in {local_file}")
+                        raise ValueError(f"No percentile timestamps found in {local_file}")
 
+                    lats, lons, grid_id = grid_coordinates(lats, lons)
                     # Process all stations
                     for _, row in station_df.iterrows():
                         stid = row["stid"]
                         lat, lon = row["latitude"], row["longitude"]
 
-                        if stid in station_index_cache:
-                            iy, ix = station_index_cache[stid]
+                        if (grid_id, stid, lat, lon) in station_index_cache:
+                            iy, ix = station_index_cache[(grid_id, stid, lat, lon)]
                         else:
                             iy, ix = ll_to_index(lat, lon, lats, lons)
-                            station_index_cache[stid] = (iy, ix)
+                            station_index_cache[(grid_id, stid, lat, lon)] = (iy, ix)
+                        if getattr(config, 'REGION', 'alaska') == 'hawaii' and outside_hawaii_grid(lat, lon, lats, lons, iy, ix):
+                            continue
 
                         record = {
                             "station_id": stid,
-                            "init_time": valid_time - pd.to_timedelta(forecast_hour, unit="h"),
+                            "init_time": init_time,
                             "valid_time": valid_time,
                             "forecast_hour": forecast_hour,
                         }
 
                         for perc, values in grib_fields.items():
                             if element == "precip24hr":
-                                record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
+                                record[f"qpf_p{perc}"] = round(float(values.reshape(lats.shape)[iy, ix] * conversion_map[element]), 2)
                             elif element == "precip6hr":
-                                record[f"qpf_p{perc}"] = round(float(values[iy, ix] * conversion_map[element]), 2)
+                                record[f"qpf_p{perc}"] = round(float(values.reshape(lats.shape)[iy, ix] * conversion_map[element]), 2)
                             elif element == "maxt":
-                                record[f"maxt_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
+                                record[f"maxt_p{perc}"] = round(float(K_to_F(values.reshape(lats.shape)[iy, ix])), 2)
                             elif element == "mint":
-                                record[f"mint_p{perc}"] = round(float(K_to_F(values[iy, ix])), 2)
+                                record[f"mint_p{perc}"] = round(float(K_to_F(values.reshape(lats.shape)[iy, ix])), 2)
                             elif element == "rh":
-                                record[f"rh_p{perc}"] = round(float(values[iy, ix]), 2)
+                                record[f"rh_p{perc}"] = round(float(values.reshape(lats.shape)[iy, ix]), 2)
                             elif element == "Wind":
-                                record[f"wind_p{perc}"] = round(float(MS_to_KTS(values[iy, ix])), 2)
+                                record[f"wind_p{perc}"] = round(float(MS_to_KTS(values.reshape(lats.shape)[iy, ix])), 2)
                             elif element == "Gust":
-                                record[f"gust_p{perc}"] = round(float(MS_to_KTS(values[iy, ix])), 2)
+                                record[f"gust_p{perc}"] = round(float(MS_to_KTS(values.reshape(lats.shape)[iy, ix])), 2)
                             elif element.startswith("snow"):
-                                record[f"snow_p{perc}"] = round(float(M_to_IN(values[iy, ix])), 1)
+                                record[f"snow_p{perc}"] = round(float(M_to_IN(values.reshape(lats.shape)[iy, ix])), 1)
                             else:
                                 raise NotImplementedError(
                                     f"Unit conversions not set up for {element} in {model}. "

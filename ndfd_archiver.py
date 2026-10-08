@@ -17,7 +17,7 @@ class NDFDArchiver(Archiver):
 
     def ensure_metadata(self):
         print(f"Creating metadata for {self.wxelement}")
-        metadata = f'alaska_{self.wxelement}_obs_metadata.csv'
+        metadata = f'{self.config.REGION}_{self.wxelement}_obs_metadata.csv'
         meta_path = Path(self.config.OBS) / metadata
         if self.wxelement == "Gust":
             meta_element = self.config.OBS_VARS['Wind']
@@ -30,7 +30,7 @@ class NDFDArchiver(Archiver):
                 self.config.API_KEY,
                 self.config.STATE,
                 meta_element,
-                self.start  # ✅ Use dynamic start date
+                0  # Ordinary variable metadata, not precipitation mode
             )
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)
@@ -40,7 +40,7 @@ class NDFDArchiver(Archiver):
 
     def ensure_metadata_precip(self):
         print(f"Creating metadata for {self.wxelement}")
-        metadata = f'alaska_{self.wxelement}_obs_metadata.csv'
+        metadata = f'{self.config.REGION}_{self.wxelement}_obs_metadata.csv'
         meta_path = Path(self.config.OBS) / metadata
         if not meta_path.exists():
             print(f"Creating metadata from {self.config.METADATA_URL}")
@@ -49,7 +49,6 @@ class NDFDArchiver(Archiver):
                 self.config.API_KEY,
                 self.config.STATE,
                 self.config.NETWORK,
-                self.start,  # ✅ Use dynamic start date
             )
             meta_df = parse_metadata(meta_json)
             meta_df.to_csv(meta_path, index=False)

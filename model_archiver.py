@@ -10,18 +10,18 @@ class ModelArchiver(Archiver):
         self.start = start or config.OBS_START  # default fallback
         self.wxelement = wxelement or config.ELEMENT
 
-        # Model extraction should use all active AK Synoptic stations,
+        # Model extraction should use all active regional Synoptic stations,
         # regardless of whether they report the requested observed variable.
         self.station_df = self.ensure_model_metadata()
 
         self.station_df.to_csv(
-            f"{self.config.MODEL}_{self.wxelement}_model_sites.csv",
+            Path(self.config.OBS) / f"{self.config.MODEL}_{self.wxelement}_model_sites.csv",
             index=False,
         )
 
     def ensure_model_metadata(self):
         """
-        Create/load all-active AK Synoptic station metadata for model extraction.
+        Create/load all-active regional Synoptic station metadata for model extraction.
 
         This metadata is intentionally not element-specific. The model archive
         should contain point forecasts for the full station universe. The obs
@@ -29,13 +29,13 @@ class ModelArchiver(Archiver):
         observed element.
         """
 
-        metadata = "alaska_all_active_synoptic_station_metadata.csv"
+        metadata = f"{self.config.REGION}_all_active_synoptic_station_metadata.csv"
         meta_path = Path(self.config.OBS) / metadata
 
         if not meta_path.exists():
             if not self.config.API_KEY:
                 raise ValueError("Set SYNOPTIC_API_KEY before requesting station metadata")
-            print(f"Creating all-active AK Synoptic metadata from {self.config.METADATA_URL}")
+            print(f"Creating all-active regional Synoptic metadata from {self.config.METADATA_URL}")
 
             meta_json = create_all_station_metadata(
                 url=self.config.METADATA_URL,
@@ -49,7 +49,7 @@ class ModelArchiver(Archiver):
             meta_df.to_csv(meta_path, index=False)
 
         else:
-            print(f"Loading all-active AK Synoptic metadata from {meta_path}")
+            print(f"Loading all-active regional Synoptic metadata from {meta_path}")
             meta_df = pd.read_csv(meta_path)
 
         self._print_station_metadata_summary(meta_df)
@@ -75,7 +75,7 @@ class ModelArchiver(Archiver):
 
         print(f"Unique model extraction stations: {station_ids.nunique():,}")
 
-        check_stations = [
+        check_stations = ["PHNL", "PHOG", "PHTO"] if self.config.REGION == "hawaii" else [
             "ABYA2",
             "NDBCABYA2",
             "KTNA2",

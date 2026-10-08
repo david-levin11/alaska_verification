@@ -1,5 +1,6 @@
 """Station-level REFS assembly and statistics, independent of GRIB/download code."""
 from refs_archive_io import read_source
+from region_config import normalize_region, refs_limits, region_root
 import numpy as np
 import pandas as pd
 
@@ -49,7 +50,7 @@ def _utc(value):
 
 
 def assemble_refs(archive_root, element, ensemble_init_time, valid_time, *,
-                  station_ids=None, max_forecast_hours=None, source_cache=None, aws_profile=None):
+                  station_ids=None, max_forecast_hours=None, source_cache=None, aws_profile=None, region='alaska'):
     """Read source-month Parquets and return a row for every expected member.
 
     archive_root is the directory containing hrrr/, rrfs/, and rrfsens/.
@@ -58,15 +59,17 @@ def assemble_refs(archive_root, element, ensemble_init_time, valid_time, *,
     Pass station_ids to also report stations missing from every source file.
     Source availability limits are configurable and are applied before reading.
     """
+    region = normalize_region(region)
+    archive_root = region_root(archive_root, region, 'model')
+    if region == 'hawaii' and element.lower().startswith('snow'):
+        raise ValueError('Snow archiving is disabled for Hawaii')
     cycle, valid = _utc(ensemble_init_time), _utc(valid_time)
     lead = (valid - cycle) / pd.Timedelta(hours=1)
     if cycle.hour % 6 or cycle.minute or cycle.second or cycle.microsecond:
         raise ValueError("REFS cycle must be 00/06/12/18 UTC")
     if not 0 <= lead <= 60 or lead != int(lead):
         raise ValueError("REFS forecast hour must be an integer from 0 through 60")
-    limits = dict(DEFAULT_MAX_HOURS)
-    if max_forecast_hours is not None:
-        limits.update(max_forecast_hours)
+    limits = refs_limits(region, max_forecast_hours)
     recipe = []
     for model, members in (("rrfs", ("control",)),
                            ("rrfsens", PERTURBED_MEMBERS), ("hrrr", ("control",))):

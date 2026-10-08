@@ -1,6 +1,7 @@
 """Batch REFS statistics into monthly local/S3 archives, or inspect a single case."""
 import argparse
 import json
+from region_config import normalize_region, region_root, refs_limits
 import pandas as pd
 from ensemble_processing import assemble_refs, summarize_refs
 from refs_archive_io import update_monthly, write_parquet
@@ -17,14 +18,21 @@ def utc_time(value):
     return pd.to_datetime(value,utc=True)
 
 
-def process_range(start, end, *, archive_root='model', output_root='derived/refs',
-                  elements=('Wind','rh','precip6hr','snow6hr','temp2m'), forecast_hours=None,
+def process_range(start, end, *, archive_root=None, output_root=None,
+                  elements=None, forecast_hours=None,
                   station_ids=None, thresholds=None, require_complete=True,
-                  max_forecast_hours=None, aws_profile=None, value_column=None, threshold_config=None):
+                  max_forecast_hours=None, aws_profile=None, value_column=None, threshold_config=None, region='alaska'):
     """Process [start,end) UTC cycles; cache each source month once per element.
 
     Monthly upserts preserve unrelated rows and make repeated cron runs safe.
     """
+    region=normalize_region(region)
+    archive_root=region_root(archive_root,region,'model')
+    output_root=region_root(output_root,region,'derived/refs')
+    if elements is None:
+        elements=[e for e in VALUES if region=='alaska' or not e.startswith('snow')]
+    if region=='hawaii' and any(e.lower().startswith('snow') for e in elements):
+        raise ValueError('Snow archiving is disabled for Hawaii')
     start,end=utc_time(start),utc_time(end)
     if start >= end:
         raise ValueError('start must be earlier than the exclusive end')
@@ -33,9 +41,7 @@ def process_range(start, end, *, archive_root='model', output_root='derived/refs
         raise ValueError('Forecast hours must be integers between 1 and 60')
     if value_column and len(elements)!=1:
         raise ValueError('--value-column requires exactly one element')
-    limits={'rrfs':60,'rrfsens':60,'hrrr':48}
-    if max_forecast_hours:
-        limits.update(max_forecast_hours)
+    limits=refs_limits(region,max_forecast_hours)
     config=resolve_threshold_config(threshold_config,thresholds,value_column)
     recipes={column: json.dumps(dict(**settings,require_complete=require_complete,
              max_forecast_hours=limits,percentiles=[5,10,25,50,75,90,95],
@@ -63,7 +69,7 @@ def process_range(start, end, *, archive_root='model', output_root='derived/refs
                         continue
                     members=assemble_refs(archive_root,element,cycle,cycle+pd.Timedelta(hours=lead),
                                           station_ids=station_ids,max_forecast_hours=limits,
-                                          source_cache=cache,aws_profile=aws_profile)
+                                          source_cache=cache,aws_profile=aws_profile,region=region)
                     if members.empty:
                         print(f'WARNING: No stations found for {element} {cycle} f{lead:03d}')
                         empty_cases+=1
@@ -93,8 +99,8 @@ def process_range(start, end, *, archive_root='model', output_root='derived/refs
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--archive-root',default='model',help='Source local directory or S3 bucket/prefix')
-    parser.add_argument('--output-root',default='derived/refs',help='Monthly statistics directory or s3://bucket/prefix')
+    parser.add_argument('--archive-root',default=None,help='Source local directory or S3 bucket/prefix')
+    parser.add_argument('--output-root',default=None,help='Monthly statistics directory or s3://bucket/prefix')
     parser.add_argument('--aws-profile',help='Optional AWS profile; otherwise use normal AWS credential chain')
     parser.add_argument('--date',help='UTC day to process; defaults to yesterday in batch mode')
     parser.add_argument('--start',help='Inclusive UTC start for batch mode')
@@ -116,9 +122,13 @@ def main():
     parser.add_argument('--rrfs-max-hour',type=int,default=60)
     parser.add_argument('--rrfsens-max-hour',type=int,default=60)
     parser.add_argument('--hrrr-max-hour',type=int,default=48)
+    parser.add_argument('--region',choices=['alaska','hawaii','ak','hi'],default='alaska')
     args=parser.parse_args()
     limits={'rrfs':args.rrfs_max_hour,'rrfsens':args.rrfsens_max_hour,'hrrr':args.hrrr_max_hour}
     try:
+        args.region=normalize_region(args.region)
+        args.archive_root=region_root(args.archive_root,args.region,'model')
+        args.output_root=region_root(args.output_root,args.region,'derived/refs')
         if args.cycle or args.valid:
             if not (args.cycle and args.valid and args.elements and len(args.elements)==1 and args.value_column):
                 parser.error('Single-case mode requires --cycle, --valid, one --element, and --value-column')
@@ -127,13 +137,14 @@ def main():
             config=resolve_threshold_config(args.threshold_config,args.thresholds,args.value_column)
             settings=config[args.value_column]
             members=assemble_refs(args.archive_root,args.elements[0],args.cycle,args.valid,
-                                  station_ids=args.stations,max_forecast_hours=limits,aws_profile=args.aws_profile)
+                                  station_ids=args.stations,max_forecast_hours=limits,aws_profile=args.aws_profile,region=args.region)
             summary=summarize_refs(members,args.value_column,thresholds=settings["thresholds"],
                                    probability_operator=settings["operator"],
                                    require_complete=not args.allow_incomplete)
             print(summary.to_string(index=False))
             for frame,path in ((summary,args.output),(members,args.members_output)):
                 if path:
+                    path=region_root(path,args.region,'output')
                     write_parquet(frame,path,args.aws_profile)
                     print(f'Saved {len(frame):,} rows to {path}')
             return
@@ -149,10 +160,10 @@ def main():
             day=utc_time(args.date).normalize() if args.date else pd.Timestamp.now(tz='UTC').normalize()-pd.Timedelta(days=1)
             start,end=day-pd.Timedelta(days=args.lookback_days-1),day+pd.Timedelta(days=1)
         process_range(start,end,archive_root=args.archive_root,output_root=args.output_root,
-                      elements=args.elements or list(VALUES),forecast_hours=args.forecast_hours,
+                      elements=args.elements,forecast_hours=args.forecast_hours,
                       station_ids=args.stations,thresholds=args.thresholds,threshold_config=args.threshold_config,
                       require_complete=not args.allow_incomplete,max_forecast_hours=limits,
-                      aws_profile=args.aws_profile,value_column=args.value_column)
+                      aws_profile=args.aws_profile,value_column=args.value_column,region=args.region)
     except (ValueError,OSError,KeyError) as exc:
         parser.exit(1,f'REFS processing failed: {exc}\n')
 

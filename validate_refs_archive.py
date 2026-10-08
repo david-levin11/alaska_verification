@@ -2,6 +2,7 @@
 import argparse
 import json
 import uuid
+from region_config import normalize_region, region_root
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -46,12 +47,14 @@ def read_parquet(path, profile):
         return pd.read_parquet(stream)
 
 
-def check_case(root, element, cycle, lead, stations, profile, raw_cache):
+def check_case(root, element, cycle, lead, stations, profile, raw_cache, region='alaska'):
     valid=cycle+pd.Timedelta(hours=lead)
-    members=assemble_refs(root,element,cycle,valid,station_ids=stations,aws_profile=profile)
+    members=assemble_refs(root,element,cycle,valid,station_ids=stations,aws_profile=profile,region=region)
     require(not members.empty, f'No members: {element} {cycle} f{lead:03d}')
     counts={3:14,6:14,12:14,42:14,45:13,48:13,51:12,54:12,57:6,60:6}
     expected=counts.get(lead,14 if lead<=42 else 13 if lead<=48 else 12 if lead<=54 else 6)
+    if normalize_region(region)=='hawaii':
+        expected=12 if lead<=54 else 6
     require(members.groupby('station_id').size().eq(expected).all(),'Incorrect member count')
     require(members.source_available.all(),f'Missing sources: {element} {cycle} f{lead:03d}: '+
             str(members.loc[~members.source_available,['station_id','ensemble_member_id']].head(10).to_dict('records')))
@@ -123,12 +126,12 @@ def run(args):
             cases={}; intervals=0; unverified=0
             for cycle in pd.date_range(day,day+pd.Timedelta(hours=18),freq='6h'):
                 for lead in leads:
-                    members,n,skipped=check_case(args.archive_root,element,cycle,lead,args.stations,args.aws_profile,raw_cache)
+                    members,n,skipped=check_case(args.archive_root,element,cycle,lead,args.stations,args.aws_profile,raw_cache,getattr(args,'region','alaska'))
                     cases[(cycle,cycle+pd.Timedelta(hours=lead))]=members
                     intervals+=n;unverified+=skipped
             kwargs=dict(archive_root=args.archive_root,output_root=root,elements=[element],
                         forecast_hours=leads,station_ids=args.stations,aws_profile=args.aws_profile,
-                        threshold_config=args.threshold_config)
+                        threshold_config=args.threshold_config,region=getattr(args,'region','alaska'))
             paths=process_range(day,day+pd.Timedelta(days=1),**kwargs)
             first={path:read_parquet(path,args.aws_profile) for path in paths}
             for path,frame in first.items():
@@ -150,11 +153,11 @@ def run(args):
         require(boundary.day==1,'--boundary-date must be the first day of a month')
         for element in args.elements:
             def boundary_check(element=element):
-                _,_,skipped=check_case(args.archive_root,element,boundary,6,args.stations,args.aws_profile,raw_cache)
+                _,_,skipped=check_case(args.archive_root,element,boundary,6,args.stations,args.aws_profile,raw_cache,getattr(args,'region','alaska'))
                 require(skipped==0,'Boundary accumulation lacks cumulative totals')
                 paths=process_range(boundary,boundary+pd.Timedelta(hours=6),archive_root=args.archive_root,
                     output_root=root+'/boundary',elements=[element],forecast_hours=[6],station_ids=args.stations,
-                    aws_profile=args.aws_profile,threshold_config=args.threshold_config)
+                    aws_profile=args.aws_profile,threshold_config=args.threshold_config,region=getattr(args,'region','alaska'))
                 require(all(p.endswith(boundary.strftime('%Y_%m')+'_archive.parquet') for p in paths),'Wrong output month')
                 return 'Previous-month lagged sources present; result saved in initialization month'
             record(element+' month boundary',boundary_check)
@@ -169,17 +172,23 @@ def run(args):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--date',required=True,help='UTC initialization day')
-    p.add_argument('--archive-root',default='model')
-    p.add_argument('--test-output-root',default='validation_output',help='Local directory or s3://bucket/test-prefix; unique child created')
-    p.add_argument('--elements',nargs='+',choices=list(VALUES),default=['precip6hr','snow6hr'])
-    p.add_argument('--stations',nargs='+',default=['PAJN'],help='Default PAJN; --all-stations checks station union found in sources')
+    p.add_argument('--archive-root',default=None)
+    p.add_argument('--test-output-root',default=None,help='Local directory or s3://bucket/test-prefix; unique child created')
+    p.add_argument('--elements',nargs='+',choices=list(VALUES),default=None)
+    p.add_argument('--stations',nargs='+',default=None,help='Default PAJN; --all-stations checks station union found in sources')
     p.add_argument('--all-stations',action='store_true')
     p.add_argument('--forecast-hours',type=int,nargs='+',default=[6,12,42,45,48,51,54,57,60])
     p.add_argument('--boundary-date',help='First UTC day of a month with archived sources')
     p.add_argument('--threshold-config')
     p.add_argument('--aws-profile')
     p.add_argument('--report',help='Optional local JSON report path')
+    p.add_argument('--region',choices=['alaska','hawaii','ak','hi'],default='alaska')
     args=p.parse_args()
+    args.region=normalize_region(args.region)
+    args.archive_root=region_root(args.archive_root,args.region,'model')
+    args.test_output_root=region_root(args.test_output_root,args.region,'validation_output')
+    args.elements=args.elements or (['precip6hr'] if args.region=='hawaii' else ['precip6hr','snow6hr'])
+    args.stations=args.stations or (['PHNL'] if args.region=='hawaii' else ['PAJN'])
     if args.all_stations: args.stations=None
     try:
         require(all(1<=h<=60 for h in args.forecast_hours),'Forecast hours must be 1–60')
