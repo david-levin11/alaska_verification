@@ -30,6 +30,7 @@ ndfd/
 derived/
 validation_output/
 snow_diagnostics/
+timestamp_diagnostics/
 rh_validation*
 *validation.json
 precip_diagnostics/
