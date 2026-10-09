@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from ensemble_processing import add_interval_precip_from_total
 import requests
+from download_retry import get_with_retry
 import fsspec
 import xarray as xr
 from datetime import datetime
@@ -609,12 +610,16 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
 
     # Download .idx file
     idx_url = remote_url + ".idx"
-    r = requests.get(idx_url, timeout=60)
-    if not r.ok:
-        print(f'     ❌ Could not get index file: {idx_url} ({r.status_code} {r.reason})')
-        return None
-
-    lines = r.text.strip().split('\n')
+    r = get_with_retry(idx_url, timeout=60)
+    try:
+        if not r.ok:
+            if r.status_code != 404:
+                raise RuntimeError(f"Could not get index file: {idx_url} (HTTP {r.status_code})")
+            print(f'     ❌ Could not get index file: {idx_url} ({r.status_code} {r.reason})')
+            return None
+        lines = r.text.strip().split('\n')
+    finally:
+        r.close()
     matched_ranges = {}
 
     # Special handling for NBM QPF percentiles
@@ -839,18 +844,29 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         print(f'      ❌ No matches found for {search_strings} for {remote_url} and {local_filename}')
         return None
 
-    # Download GRIB subset
-    with open(local_filename, 'wb') as f_out:
-        for byteRange in matched_ranges.keys():
-            r = requests.get(remote_url, headers={'Range': f'bytes=' + byteRange}, timeout=60)
-            if r.status_code in (200, 206):
-                f_out.write(r.content)
-            else:
-                print(f"      ❌ Failed to download byte range {byteRange} with status code {r.status_code}")
-                return None
+    # Publish only a complete subset; never leave partial data at the final path.
+    partial_filename = local_filename + ".part"
+    try:
+        with open(partial_filename, 'wb') as f_out:
+            for byteRange in matched_ranges:
+                r = get_with_retry(remote_url, headers={'Range': 'bytes=' + byteRange}, timeout=60)
+                try:
+                    if r.status_code in (200, 206):
+                        f_out.write(r.content)
+                    else:
+                        raise RuntimeError(
+                            f"Failed to download {remote_url} range {byteRange}: HTTP {r.status_code}"
+                        )
+                finally:
+                    r.close()
+        os.replace(partial_filename, local_filename)
+    finally:
+        if os.path.exists(partial_filename):
+            os.remove(partial_filename)
 
     print(f'      ✅ Downloaded [{len(matched_ranges)}] fields from {os.path.basename(remote_url)} → {local_filename}')
-    return local_filename if os.path.exists(local_filename) else None
+    return local_filename
+
 
 def parse_date_and_time_from_url(remote_url, model):
     url_parts = remote_url.split('/')
@@ -943,7 +959,12 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
         futures = [executor.submit(download_file, url) for url in file_urls]
         downloaded_files = []
         for i, future in enumerate(as_completed(futures), 1):
-            remote_url, local_file = future.result()
+            try:
+                remote_url, local_file = future.result()
+            except Exception:
+                for pending in futures:
+                    pending.cancel()
+                raise
             if local_file:
                 downloaded_files.append(local_file)
             print(f"✅ Downloaded {i}/{len(file_urls)} files.")
@@ -1309,5 +1330,6 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
                 group_cols=("station_id", "init_time")
             )
     return df
+
 
 
