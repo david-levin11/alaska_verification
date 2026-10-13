@@ -21,6 +21,13 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
     else:
         config.USE_CLOUD_STORAGE = True
 
+    # Temperature values can change when a window is fetched again. Identify
+    # the observation by station/date/window, not by its value or metadata.
+    dedup_columns = (
+        ["stid", "date", "window_start", "window_end"]
+        if element in ("maxt", "mint") else None
+    )
+
     config.ELEMENT = element
     archiver = ObsArchiver(config)
     stations = archiver.get_station_metadata()
@@ -51,10 +58,13 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
         if df.empty:
             print("⚠️ No data extracted for this chunk.")
         else:
-            
+            # Also deduplicate a new batch before a file's first write.
+            if dedup_columns:
+                df = df.drop_duplicates(subset=dedup_columns, keep="last")
+
             if config.USE_CLOUD_STORAGE:
                 s3_path = f"{config.S3_URLS['obs']}{current.year}_{current.month:02d}_obs_{element.lower()}_archive.parquet"
-                archiver.write_to_s3(df, s3_path)
+                archiver.write_to_s3(df, s3_path, dedup_columns=dedup_columns)
             else:
                 local_path = os.path.join(
                     config.MODEL_DIR,
@@ -62,7 +72,7 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
                     element.lower(),
                     f"{current.year}_{current.month:02d}_archive.parquet"
                 )
-                archiver.write_local_output(df, local_path)
+                archiver.write_local_output(df, local_path, dedup_columns=dedup_columns)
 
         #shutil.rmtree(config.TMP, ignore_errors=True)
         #os.makedirs(config.TMP, exist_ok=True)
