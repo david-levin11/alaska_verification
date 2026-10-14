@@ -151,14 +151,14 @@ for model in "${MODEL_LIST[@]}"; do
   fi
 done
 RC=0
-REFS_SOURCE_FAILED=0
+declare -A REFS_FAILED_SOURCES=()
 
 # -------------------------------
 # Main model→element loop (NBM/HRRR/RRFS/URMA/NBMQMD*)
 # -------------------------------
 for model in "${MODEL_LIST[@]}"; do
   if [[ -z "${AVAILABLE_FIELDS[$model]+set}" ]]; then
-    log_warn "Model '${model}' not in AVAILABLE_FIELDS; skipping." | tee -a "$LOG_FILE"
+    log_warn "Model '${model}' not in AVAILABLE_FIELDS; skipping." 2>&1 | tee -a "$LOG_FILE"
     continue
   fi
 
@@ -202,23 +202,30 @@ for model in "${MODEL_LIST[@]}"; do
     if "${cmd[@]}" >>"$LOG_FILE" 2>&1; then
       log_info "OK: model=${model} element=${element} (START=${START} END=${END})" | tee -a "$LOG_FILE"
     else
-      log_error "FAILED: model=${model} element=${element} (START=${START} END=${END})" | tee -a "$LOG_FILE"
+      log_error "FAILED: model=${model} element=${element} (START=${START} END=${END})" 2>&1 | tee -a "$LOG_FILE"
       RC=1
-      if [[ "$model" =~ ^(hrrr|rrfs|rrfsens)$ ]]; then REFS_SOURCE_FAILED=1; fi
+      if [[ "$model" =~ ^(hrrr|rrfs|rrfsens)$ ]]; then
+        source_element="${element,,}"
+        REFS_FAILED_SOURCES["$source_element"]="${REFS_FAILED_SOURCES[$source_element]:-} $model"
+      fi
     fi
   done
 done
 
-# REFS statistics run only after every selected source model has finished.
+# Process each element independently after all selected source jobs finish.
+# A failed source or statistics job must not block unrelated derived fields.
 if [[ "$RUN_REFS" == "1" ]]; then
-  if [[ "$REFS_SOURCE_FAILED" == "1" ]]; then
-    log_error "Skipping REFS statistics because a source archiver failed." | tee -a "$LOG_FILE"
-  else
-    read -r -a refs_elements <<< "${REFS_ELEMENTS:-$DEFAULT_REFS_ELEMENTS}"
+  read -r -a refs_elements <<< "${REFS_ELEMENTS:-$DEFAULT_REFS_ELEMENTS}"
+  for element in "${refs_elements[@]}"; do
+    refs_element="${element,,}"
+    if [[ -n "${REFS_FAILED_SOURCES[$refs_element]:-}" ]]; then
+      log_error "Skipping REFS element=$refs_element because source archiver(s) failed:${REFS_FAILED_SOURCES[$refs_element]}" 2>&1 | tee -a "$LOG_FILE"
+      continue
+    fi
     refs_cmd=(python run_refs_processing.py "${REGION_ARGS[@]}"
               --archive-root "$REFS_ARCHIVE_ROOT" --output-root "$REFS_OUTPUT_ROOT"
               --threshold-config "${REFS_THRESHOLD_CONFIG:-refs_thresholds.json}"
-              --elements "${refs_elements[@]}")
+              --elements "$refs_element")
     if [[ -n "${GLOBAL_START:-}" ]]; then
       refs_cmd+=(--start "$GLOBAL_START" --end "$GLOBAL_END")
     else
@@ -228,13 +235,16 @@ if [[ "$RUN_REFS" == "1" ]]; then
     if [[ "${REFS_ALLOW_INCOMPLETE:-0}" == "1" ]]; then refs_cmd+=(--allow-incomplete); fi
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
       log_info "DRY_RUN: ${refs_cmd[*]}" | tee -a "$LOG_FILE"
-    elif "${refs_cmd[@]}" >>"$LOG_FILE" 2>&1; then
-      log_info "OK: REFS monthly statistics" | tee -a "$LOG_FILE"
     else
-      log_error "FAILED: REFS monthly statistics" | tee -a "$LOG_FILE"
-      RC=1
+      log_info "Running: ${refs_cmd[*]}" | tee -a "$LOG_FILE"
+      if "${refs_cmd[@]}" >>"$LOG_FILE" 2>&1; then
+        log_info "OK: REFS element=$refs_element monthly statistics" | tee -a "$LOG_FILE"
+      else
+        log_error "FAILED: REFS element=$refs_element monthly statistics" 2>&1 | tee -a "$LOG_FILE"
+        RC=1
+      fi
     fi
-  fi
+  done
 fi
 
 # -------------------------------
@@ -272,7 +282,7 @@ if [[ "$RUN_NDFD" == "1" ]]; then
     if "${ndfd_cmd[@]}" >>"$LOG_FILE" 2>&1; then
       log_info "OK: NDFD element=${element} (START=${NDFD_START} END=${NDFD_END})" | tee -a "$LOG_FILE"
     else
-      log_error "FAILED: NDFD element=${element} (START=${NDFD_START} END=${NDFD_END})" | tee -a "$LOG_FILE"
+      log_error "FAILED: NDFD element=${element} (START=${NDFD_START} END=${NDFD_END})" 2>&1 | tee -a "$LOG_FILE"
       RC=1
     fi
   done
@@ -315,7 +325,7 @@ if [[ "$RUN_OBS" == "1" ]]; then
     if "${obs_cmd[@]}" >>"$LOG_FILE" 2>&1; then
       log_info "OK: OBS element=${element} (START=${OBS_START} END=${OBS_END})" | tee -a "$LOG_FILE"
     else
-      log_error "FAILED: OBS element=${element} (START=${OBS_START} END=${OBS_END})" | tee -a "$LOG_FILE"
+      log_error "FAILED: OBS element=${element} (START=${OBS_START} END=${OBS_END})" 2>&1 | tee -a "$LOG_FILE"
       RC=1
     fi
   done
