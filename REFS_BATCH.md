@@ -80,10 +80,13 @@ Default behavior:
 - `REFS_LOOKBACK_DAYS=2`: reprocess yesterday and the day before.
 - HRRR, RRFS, and RRFSENS source downloads cover that window **plus the preceding
   18 UTC run** needed for the first 00 UTC ensemble's lagged members.
-- Statistics run after all selected models finish. A nonzero exit from a REFS
-  source archiver skips statistics and makes the wrapper fail. Downloaders may
-  report individual missing files without a nonzero exit; completeness counts
-  still expose those gaps.
+- Statistics run after all selected models finish, in a separate invocation for
+  each element. A nonzero exit from a REFS source archiver skips only that
+  element's statistics; unrelated elements still run. A statistics failure also
+  does not stop later elements. Any failed job still makes the wrapper return a
+  nonzero exit status. Failures and per-element skips are recorded in the log.
+  Downloaders may report individual missing files without a nonzero exit;
+  completeness counts still expose those gaps.
 - `SOURCE_STORAGE=local`: source archivers retain local storage by default.
 - `REFS_ARCHIVE_ROOT=model`, `REFS_OUTPUT_ROOT=derived/refs`.
 
