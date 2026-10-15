@@ -16,10 +16,10 @@ def downloader(index):
     ranges=[]
     def get(url,**kwargs):
         if url.endswith('.idx'):
-            return SimpleNamespace(ok=True,text=index)
+            return SimpleNamespace(ok=True,text=index,close=lambda: None)
         ranges.append(kwargs['headers']['Range'])
-        return SimpleNamespace(status_code=206,content=b'GRIB-test')
-    ns=dict(os=os,re=re,requests=SimpleNamespace(get=get))
+        return SimpleNamespace(status_code=206,content=b'GRIB-test',close=lambda: None)
+    ns=dict(os=os,re=re,get_with_retry=get)
     exec(compile(ast.Module(body=nodes,type_ignores=[]),'utils.py','exec'),ns)
     return ns['download_subset'],ranges
 
@@ -65,3 +65,4 @@ class PrecipSelectionTest(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

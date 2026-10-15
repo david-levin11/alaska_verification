@@ -8,7 +8,6 @@ from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
-from calendar import monthrange
 
 # setting temp file dir
 os.makedirs(config.TMP, exist_ok=True)
@@ -62,18 +61,8 @@ def run_monthly_archiving(start, end, model_name, element, use_local, region='al
     )
     current = start
     while current <= end:
-        if model == 'rrfsens':
-            month_end = current.normalize() + pd.offsets.MonthBegin(1)
-            chunk_end = min(current + pd.Timedelta(days=1), month_end) - pd.Timedelta(minutes=1)
-        elif model in ['nbmqmd', 'nbmqmd_exp']:
-            # Get the last day of the current month
-            last_day = monthrange(current.year, current.month)[1]
-            month_end = current.replace(day=last_day, hour=23, minute=59)
-
-            # Try to go 10 days ahead, but cap it at the end of the current month
-            chunk_end = min(current + pd.Timedelta(days=10) - pd.Timedelta(minutes=1), month_end)
-        else:
-            chunk_end = current.normalize() + pd.offsets.MonthBegin(1) - pd.Timedelta(minutes=1)
+        # Save each UTC day independently, retaining monthly output files.
+        chunk_end = current.normalize() + pd.Timedelta(days=1) - pd.Timedelta(minutes=1)
 
         if chunk_end > end:
             chunk_end = end
@@ -84,7 +73,13 @@ def run_monthly_archiving(start, end, model_name, element, use_local, region='al
         if not file_urls:
             print("⚠️ No files found for this chunk.")
         else:
-            df = archiver.process_files(file_urls)
+            try:
+                df = archiver.process_files(file_urls)
+            except Exception:
+                print(f"ERROR: {model} {element} chunk {current} through {chunk_end} "
+                      f"was not saved. Restart with --start {current:%Y%m%d%H%M}; "
+                      "previously saved days remain in the monthly archive.")
+                raise
             #print(f'Dataframe is: {df.head(10)}')
             #df.to_csv('test.csv')
             if df.empty:
