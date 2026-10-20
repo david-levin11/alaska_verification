@@ -20,31 +20,45 @@ class ObsArchiver(Archiver):
         self.max_retries = config.MAX_RETRIES
 
     def get_station_metadata(self):
+        """Discover regional stations, including listings without Alaska STATE tags."""
         # Current station status is not a reliable indicator of observation
         # availability, including for historical backfills. Include all statuses.
         params = {
-            "state": self.state,
             "hfmetar": self.hfmetar,
             "token": self.api_token,
             "units": "english",
             "complete": "1",
             "format": "json"
         }
-        response = requests.get(self.metadata_url, params=params)
-        response.raise_for_status()
-        metadata = response.json()
-        stations = metadata.get("STATION", [])
-        
+        # Split at the dateline rather than depending on API wraparound behavior.
+        # These regional bounds include offshore and neighboring stations; they
+        # are deliberately not a strict Alaska land boundary.
+        selectors = (
+            [{"bbox": "-180,50,-129,73"}, {"bbox": "170,50,180,73"}]
+            if self.state.lower() == "ak" else [{"state": self.state}]
+        )
+        stations = {}
+        for selector in selectors:
+            response = requests.get(self.metadata_url, params={**params, **selector}, timeout=60)
+            response.raise_for_status()
+            metadata = response.json()
+            code = str(metadata.get("SUMMARY", {}).get("RESPONSE_CODE", ""))
+            if code == "2":
+                continue
+            if code != "1" or not isinstance(metadata.get("STATION"), list):
+                raise ValueError(f"Unexpected Synoptic metadata response (code={code or 'missing'})")
+            for station in metadata["STATION"]:
+                stations[station["STID"]] = station
+
         self.station_metadata = {
             s["STID"]: {
                 "zone": s.get("NWSZONE"),
                 "cwa": s.get("CWA")
             }
-            for s in stations
+            for s in stations.values()
         }
-        #obs_meta_df = pd.DataFrame(self.station_metadata)
-        #obs_meta_df.to_csv("obs_metadata.csv")
-        #print(f"stations are: {list(self.station_metadata.keys())}")
+        selection = "Alaska geographic bounds" if self.state.lower() == "ak" else f"state={self.state}"
+        print(f"OBS metadata: {len(stations):,} stations selected using {selection}; all statuses included")
         return list(self.station_metadata.keys())
     
     @staticmethod
@@ -530,8 +544,8 @@ class ObsArchiver(Archiver):
         return None
 
 ##TODO Will need to update to grab precipitation and max/min temps
-#  Can use statistics api for max/min temps: https://api.synopticlabs.org/v2/stations/legacystats?&token=c6c8a66a96094960aabf1fed7d07ccf0&vars=air_temp&start=202507081200&end=202507090600&type=maximum&units=temp%7Cf 
-#  Can use precip api for precip: https://api.synopticdata.com/v2/stations/precipitation?&token=c6c8a66a96094960aabf1fed7d07ccf0&bbox=-154.5,63.0,-141.0,66.0&pmode=totals&start=202507071200&end=202507081200&units=precip|in
+#  Can use statistics api for max/min temps: https://api.synopticlabs.org/v2/stations/legacystats?&token=YOUR_API_KEY&vars=air_temp&start=202507081200&end=202507090600&type=maximum&units=temp%7Cf
+#  Can use precip api for precip: https://api.synopticdata.com/v2/stations/precipitation?&token=YOUR_API_KEY&bbox=-154.5,63.0,-141.0,66.0&pmode=totals&start=202507071200&end=202507081200&units=precip|in
 #
 if __name__ == "__main__":
     obs_archiver = ObsArchiver(config)

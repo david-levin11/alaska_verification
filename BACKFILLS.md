@@ -1,5 +1,25 @@
 # Model backfills and recovery
 
+## OBS station discovery
+
+Alaska observation runs discover stations using two geographic boxes in
+`west,south,east,north` order: `-180,50,-129,73` and `170,50,180,73`.
+The second box includes the western Aleutians across the dateline. No state,
+network, or active-status filter is applied to Alaska OBS discovery. These
+regional bounds intentionally include offshore and some neighboring stations;
+they are not an exact Alaska jurisdiction boundary. Hawaii retains its state
+selection, including all statuses.
+
+Stations returned by both queries are deduplicated by STID; distinct prefixed
+and unprefixed IDs are preserved. The subsequent observation requests still
+select the requested variables and dates. The legacy diagnostic filename
+`obs/obs_stations_active.txt` now lists all selected statuses. Discovery runs
+fresh on each OBS invocation, so no metadata cache needs to be deleted.
+Rerun OBS backfills to add missing station observations to existing archives.
+This does not change model or NDFD station discovery, or verification alias matching.
+
+## Model checkpoints
+
 `run_model_archiver.py` now processes one UTC calendar day at a time for every
 supported model, including HRRR, NBM core, and NBMQMD. Each completed day's
 records are appended and deduplicated in the existing monthly Parquet file.
