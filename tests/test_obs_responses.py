@@ -11,6 +11,30 @@ import requests
 
 
 class ObservationResponses(unittest.TestCase):
+    def test_metadata_includes_inactive_stations_for_each_region(self):
+        tree = ast.parse((Path(__file__).parents[1] / 'obs_archiver.py').read_text())
+        cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'ObsArchiver')
+        method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == 'get_station_metadata')
+        inventory = [
+            {'STID': 'PAJN', 'STATUS': 'ACTIVE', 'NWSZONE': 'AKZ325', 'CWA': 'AJK'},
+            {'STID': 'NKXA2', 'STATUS': 'INACTIVE', 'NWSZONE': None, 'CWA': 'AJK'},
+            {'STID': 'RIXA2', 'STATUS': 'INACTIVE', 'NWSZONE': None, 'CWA': 'AJK'},
+        ]
+        def metadata_response(url, params):
+            rows = [s for s in inventory if not params.get('status') or
+                    s['STATUS'].lower() == params['status'].lower()]
+            return self.response({'STATION': rows})
+        get = Mock(side_effect=metadata_response)
+        ns = dict(requests=SimpleNamespace(get=get))
+        exec(compile(ast.Module(body=[method], type_ignores=[]), 'obs_archiver.py', 'exec'), ns)
+        for state in ('ak', 'hi'):
+            with self.subTest(state=state):
+                instance = SimpleNamespace(state=state, hfmetar=0, api_token='secret',
+                                           metadata_url='https://example.test')
+                self.assertEqual(ns['get_station_metadata'](instance), ['PAJN', 'NKXA2', 'RIXA2'])
+                self.assertEqual(instance.station_metadata['NKXA2']['cwa'], 'AJK')
+                self.assertEqual(get.call_args.kwargs['params']['state'], state)
+
     def run_fetch(self, responses, station_ids=None):
         tree = ast.parse((Path(__file__).parents[1] / 'obs_archiver.py').read_text())
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'ObsArchiver')

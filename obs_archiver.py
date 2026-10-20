@@ -20,12 +20,13 @@ class ObsArchiver(Archiver):
         self.max_retries = config.MAX_RETRIES
 
     def get_station_metadata(self):
+        # Current station status is not a reliable indicator of observation
+        # availability, including for historical backfills. Include all statuses.
         params = {
             "state": self.state,
             "hfmetar": self.hfmetar,
             "token": self.api_token,
             "units": "english",
-            "status": "active",
             "complete": "1",
             "format": "json"
         }
