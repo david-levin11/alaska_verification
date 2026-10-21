@@ -47,7 +47,8 @@ class ObservationResponses(unittest.TestCase):
 
     def test_metadata_keeps_aliases_but_deduplicates_repeated_ids(self):
         payload = {'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION': [
-            {'STID': 'RIXA2'}, {'STID': 'NDBCRIXA2'}]}
+            {'STID': 'RIXA2', 'LATITUDE': '58.17706', 'LONGITUDE': '-135.05154'},
+            {'STID': 'NDBCRIXA2', 'LATITUDE': '58.177', 'LONGITUDE': '-135.052'}]}
         selected, _ = self.run_metadata(Mock(return_value=self.response(payload)))
         self.assertEqual(selected, ['RIXA2', 'NDBCRIXA2'])
 
@@ -62,15 +63,38 @@ class ObservationResponses(unittest.TestCase):
 
     def test_empty_box_preserves_other_box_results(self):
         get = Mock(side_effect=[self.response({'SUMMARY': {'RESPONSE_CODE': '2'}}),
-            self.response({'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION': [{'STID': 'WESTERN_ISLAND'}]})])
+            self.response({'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION': [
+                {'STID': 'WESTERN_ISLAND', 'LATITUDE': '52', 'LONGITUDE': '173'}]})])
         self.assertEqual(self.run_metadata(get)[0], ['WESTERN_ISLAND'])
 
     def test_metadata_error_does_not_return_partial_inventory(self):
         get = Mock(side_effect=[
-            self.response({'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION': [{'STID': 'NKXA2'}]}),
+            self.response({'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION': [
+                {'STID': 'NKXA2', 'LATITUDE': '58.25531', 'LONGITUDE': '-134.94505'}]}),
             self.response({'SUMMARY': {'RESPONSE_CODE': 200}})])
         with self.assertRaisesRegex(ValueError, 'metadata response'):
             self.run_metadata(get)
+
+    def test_alaska_rejects_out_of_bounds_even_when_api_returns_them(self):
+        # Actual unexpected locations from the enlarged May 2026 archive.
+        rows = [
+            dict(STID='FMI101756', LATITUDE='64.11197', LONGITUDE='28.33639'),
+            dict(STID='F0022', LATITUDE='53.52183', LONGITUDE='-113.64467'),
+            dict(STID='NKXA2', LATITUDE='58.25531', LONGITUDE='-134.94505', STATUS='INACTIVE'),
+            dict(STID='NDBCRIXA2', LATITUDE='58.177', LONGITUDE='-135.052', STATE=None),
+            dict(STID='WESTERN_ISLAND', LATITUDE='52', LONGITUDE='173'),
+            dict(STID='DATELINE_WEST', LATITUDE='52', LONGITUDE='-180'),
+            dict(STID='DATELINE_EAST', LATITUDE='52', LONGITUDE='180'),
+            dict(STID='TOO_NORTH', LATITUDE='74', LONGITUDE='-150'),
+            dict(STID='TOO_SOUTH', LATITUDE='49', LONGITUDE='-150'),
+            dict(STID='TOO_FAR_WEST', LATITUDE='52', LONGITUDE='169'),
+            dict(STID='MISSING_COORDS'),
+            dict(STID='BAD_COORDS', LATITUDE='58', LONGITUDE=None),
+            dict(STID='NAN_COORDS', LATITUDE='NaN', LONGITUDE='-150'),
+        ]
+        get = Mock(return_value=self.response({'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION': rows}))
+        self.assertEqual(set(self.run_metadata(get)[0]), {
+            'NKXA2', 'NDBCRIXA2', 'WESTERN_ISLAND', 'DATELINE_WEST', 'DATELINE_EAST'})
 
     def run_fetch(self, responses, station_ids=None):
         tree = ast.parse((Path(__file__).parents[1] / 'obs_archiver.py').read_text())

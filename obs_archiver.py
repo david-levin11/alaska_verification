@@ -37,7 +37,10 @@ class ObsArchiver(Archiver):
             [{"bbox": "-180,50,-129,73"}, {"bbox": "170,50,180,73"}]
             if self.state.lower() == "ak" else [{"state": self.state}]
         )
+        alaska_bounds = [tuple(map(float, s["bbox"].split(",")))
+                         for s in selectors if "bbox" in s]
         stations = {}
+        rejected = set()
         for selector in selectors:
             response = requests.get(self.metadata_url, params={**params, **selector}, timeout=60)
             response.raise_for_status()
@@ -48,6 +51,20 @@ class ObsArchiver(Archiver):
             if code != "1" or not isinstance(metadata.get("STATION"), list):
                 raise ValueError(f"Unexpected Synoptic metadata response (code={code or 'missing'})")
             for station in metadata["STATION"]:
+                # Never trust the remote bbox alone: dateline-edge requests can
+                # return coordinates beyond the intended region. Validate the
+                # union locally before any observation downloads are requested.
+                if alaska_bounds:
+                    try:
+                        lat = float(station["LATITUDE"])
+                        lon = float(station["LONGITUDE"])
+                    except (KeyError, TypeError, ValueError):
+                        rejected.add(station.get("STID"))
+                        continue
+                    if not any(west <= lon <= east and south <= lat <= north
+                               for west, south, east, north in alaska_bounds):
+                        rejected.add(station.get("STID"))
+                        continue
                 stations[station["STID"]] = station
 
         self.station_metadata = {
@@ -59,6 +76,8 @@ class ObsArchiver(Archiver):
         }
         selection = "Alaska geographic bounds" if self.state.lower() == "ak" else f"state={self.state}"
         print(f"OBS metadata: {len(stations):,} stations selected using {selection}; all statuses included")
+        if rejected:
+            print(f"OBS metadata: rejected {len(rejected):,} listings outside geographic bounds or with invalid coordinates")
         return list(self.station_metadata.keys())
     
     @staticmethod

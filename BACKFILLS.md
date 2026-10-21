@@ -9,6 +9,10 @@ network, or active-status filter is applied to Alaska OBS discovery. These
 regional bounds intentionally include offshore and some neighboring stations;
 they are not an exact Alaska jurisdiction boundary. Hawaii retains its state
 selection, including all statuses.
+Returned coordinates are also checked locally against the union of both boxes
+before requesting observations. Out-of-region listings and listings with missing
+or invalid coordinates are rejected and counted in the log, even if the API
+returns them for a bbox query.
 
 Stations returned by both queries are deduplicated by STID; distinct prefixed
 and unprefixed IDs are preserved. The subsequent observation requests still
