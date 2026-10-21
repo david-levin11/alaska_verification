@@ -4,7 +4,13 @@
 
 Alaska observation runs discover stations using two geographic boxes in
 `west,south,east,north` order: `-180,50,-129,73` and `170,50,180,73`.
-The second box includes the western Aleutians across the dateline. No state,
+The second box includes the western Aleutians across the dateline. API requests
+use `-179.999999,50,-129,73` and `170,50,179.999999,73`: live probes on
+2026-10-21 showed that exact -180 and +180 endpoints returned thousands of
+out-of-box stations, while both inset requests returned zero out-of-box stations.
+This tiny inset (less than 0.1 m at these latitudes) avoids the observed API
+endpoint behavior; local validation retains the original full geographic bounds.
+No state,
 network, or active-status filter is applied to Alaska OBS discovery. These
 regional bounds intentionally include offshore and some neighboring stations;
 they are not an exact Alaska jurisdiction boundary. Hawaii retains its state

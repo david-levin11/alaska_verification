@@ -52,6 +52,14 @@ class ObservationResponses(unittest.TestCase):
         selected, _ = self.run_metadata(Mock(return_value=self.response(payload)))
         self.assertEqual(selected, ['RIXA2', 'NDBCRIXA2'])
 
+    def test_alaska_requests_use_verified_endpoints_inside_dateline(self):
+        # User's live probes: exact +/-180 returned thousands of stations
+        # outside the requested boxes; these inset endpoints returned none.
+        get = Mock(return_value=self.response({'SUMMARY': {'RESPONSE_CODE': 2}}))
+        self.run_metadata(get)
+        self.assertEqual([call.kwargs['params']['bbox'] for call in get.call_args_list], [
+            '-179.999999,50,-129,73', '170,50,179.999999,73'])
+
     def test_hawaii_retains_state_selection_and_inactive_listings(self):
         get = Mock(return_value=self.response({'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION': [
             {'STID': 'PHNL', 'STATUS': 'ACTIVE'}, {'STID': 'OLD_HI', 'STATUS': 'INACTIVE'}]}))

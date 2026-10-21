@@ -30,15 +30,19 @@ class ObsArchiver(Archiver):
             "complete": "1",
             "format": "json"
         }
-        # Split at the dateline rather than depending on API wraparound behavior.
+        # Live API probes return out-of-box stations with exactly +/-180 as an
+        # endpoint. Split the requests just inside the dateline: the same probes
+        # with +/-179.999999 returned no out-of-box stations.
         # These regional bounds include offshore and neighboring stations; they
         # are deliberately not a strict Alaska land boundary.
         selectors = (
-            [{"bbox": "-180,50,-129,73"}, {"bbox": "170,50,180,73"}]
+            [{"bbox": "-179.999999,50,-129,73"}, {"bbox": "170,50,179.999999,73"}]
             if self.state.lower() == "ak" else [{"state": self.state}]
         )
-        alaska_bounds = [tuple(map(float, s["bbox"].split(",")))
-                         for s in selectors if "bbox" in s]
+        # Keep validation bounds at the true dateline, independently of the
+        # request workaround. The endpoint inset is less than 0.1 m here.
+        alaska_bounds = ([(-180, 50, -129, 73), (170, 50, 180, 73)]
+                         if self.state.lower() == "ak" else [])
         stations = {}
         rejected = set()
         for selector in selectors:
