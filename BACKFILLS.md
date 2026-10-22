@@ -1,5 +1,30 @@
 # Model backfills and recovery
 
+## Standardized local NDFD layout
+
+New local NDFD writes use `model/ndfd/<element>/YYYY_MM_archive.parquet`, or
+`hawaii/model/ndfd/<element>/YYYY_MM_archive.parquet` for Hawaii. S3 routing and
+filenames are unchanged. Existing legacy files are not moved automatically.
+
+With archive writers stopped, preview and then apply the migration:
+
+```shell
+python migrate_ndfd_archives.py
+python migrate_ndfd_archives.py --apply
+```
+
+The default root is this script's directory. Use `--root /path/to/archive-root`
+for another tree and `--region hawaii` or `--region all` for regional selection.
+Legacy inputs can be under `ndfd/<element>/` or directly in `ndfd/`.
+All affected source and existing destination files are copied to a timestamped
+`ndfd_migration_backup_*` directory before any moves. Existing destinations are
+merged with sources, removing only exact duplicate rows and preserving differing
+records. A lone source without a destination is moved without rewriting its bytes.
+The backup's `manifest.json` records completed files and any failure; migration is
+safe to rerun. On failure, previously completed files may already be migrated,
+and each successfully migrated file has its original preserved in the backup.
+Empty legacy folders remain.
+
 ## OBS station discovery
 
 Alaska observation runs discover stations using two geographic boxes in

@@ -56,7 +56,10 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
                 s3_url = f"{config.S3_URLS['ndfd']}{filename}"
                 archiver.write_to_s3(df, s3_url)
             else:
-                local_path = os.path.join(config.NDFD_DIR, element.lower(), filename)
+                local_path = os.path.join(
+                    config.MODEL_DIR, "ndfd", element.lower(),
+                    f"{current.year}_{current.month:02d}_archive.parquet",
+                )
                 archiver.write_local_output(df, local_path)
 
         shutil.rmtree(config.TMP, ignore_errors=True)
