@@ -133,7 +133,8 @@ def test_source_routing_schedules_and_classification(region, tmp_path, monkeypat
 
 
 @pytest.mark.parametrize('element', ELEMENTS)
-def test_real_extractor_outputs_deterministic_columns(element, monkeypatch, tmp_path):
+@pytest.mark.parametrize('locked_download', [False, True])
+def test_real_extractor_outputs_deterministic_columns(element, locked_download, monkeypatch, tmp_path, capsys):
     config.MODEL='nbm'
     config.ELEMENT=element
     message=Message(element,36)
@@ -145,6 +146,13 @@ def test_real_extractor_outputs_deterministic_columns(element, monkeypatch, tmp_
         p=Path(kwargs['local_filename']);p.write_bytes(b'fake-grib');return str(p)
     monkeypatch.setattr(utils,'download_subset',download)
     monkeypatch.setattr(tempfile,'tempdir',str(tmp_path))
+    if locked_download:
+        original_unlink = os.unlink
+        def unlink(path, *args, **kwargs):
+            if str(path).endswith('.grib2'):
+                raise PermissionError(13, 'File is being used by another process', str(path))
+            return original_unlink(path, *args, **kwargs)
+        monkeypatch.setattr(os, 'unlink', unlink)
     result=utils.extract_model_subset_parallel(
         ['https://example.test/blend.20261025/00/qmd/blend.t00z.qmd.f036.ak.grib2'],
         pd.DataFrame({'stid':['NKXA2'],'latitude':[58.0],'longitude':[-135.0]}),
@@ -153,7 +161,16 @@ def test_real_extractor_outputs_deterministic_columns(element, monkeypatch, tmp_
     assert result[element].tolist()==[1 if element.startswith('precip') else 32]
     assert result.init_time.iloc[0]==pd.Timestamp('2026-10-25')
     assert result.valid_time.iloc[0]==pd.Timestamp('2026-10-26 12:00')
-    assert not list(tmp_path.glob('model_downloads_*'))
+    if locked_download:
+        assert list(tmp_path.glob('model_downloads_*/*.grib2'))
+        assert 'Continuing with extracted forecasts' in capsys.readouterr().out
+        # Exercise the real archive writer after cleanup encounters the lock.
+        output = tmp_path / 'model' / 'nbm' / element / '2026_10_archive.parquet'
+        Archiver.write_local_output(SimpleNamespace(), result, str(output),
+            dedup_columns=['station_id', 'init_time', 'valid_time', 'forecast_hour'])
+        pd.testing.assert_frame_equal(pd.read_parquet(output), result)
+    else:
+        assert not list(tmp_path.glob('model_downloads_*'))
 
 
 def test_download_subset_preserves_nbmqmd_percentiles(monkeypatch, tmp_path):

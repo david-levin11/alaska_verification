@@ -1332,11 +1332,10 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
 
             except Exception as e:
                 print(f"❌ Failed to process {local_file}: {e}")
-    # cleaning up
-    for local_file in downloaded_files:
-        Path(local_file).unlink(missing_ok=True)
-
-    shutil.rmtree(temp_download_dir)
+    # A Windows file lock during disposable-file cleanup must not prevent
+    # successfully extracted forecasts from reaching the archive writer.
+    from temp_cleanup import cleanup_model_downloads
+    cleanup_model_downloads(temp_download_dir)
     df = pd.DataFrame.from_records(all_records)
     # logic for creating accum intervals from total precip for models that output only tp
     if model in ["hrrr", "rrfs"] and element == "precip6hr":
