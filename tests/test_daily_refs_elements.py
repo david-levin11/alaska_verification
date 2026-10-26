@@ -125,3 +125,16 @@ def test_hawaii_supported_elements_continue(tmp_path):
     assert derived_elements(refs) == ['wind', 'precip6hr', 'temp2m']
     assert all('hawaii' in command for command in refs)
     assert 'Skipping REFS element=rh' in log
+
+
+@pytest.mark.parametrize('region', ['alaska', 'hawaii'])
+def test_nbm_deterministic_qmd_uses_zero_hour_window(tmp_path, region):
+    result, records, _, _ = run_wrapper(tmp_path, REGION=region, MODELS='nbm',
+        RUN_REFS='0', REFS_ELEMENTS='Wind rh precip6hr temp2m',
+        NDFD_ELEMENTS='Wind', OBS_ELEMENTS='Wind')
+    assert result.returncode == 0, result.stderr
+    commands = {r[r.index('--element')+1]: r for r in records if r[0] == 'run_model_archiver.py'}
+    for element in ('precip6hr', 'precip24hr', 'maxt', 'mint'):
+        assert commands[element][commands[element].index('--start')+1] == '202610120000'
+        assert commands[element][commands[element].index('--end')+1] == '202610130000'
+    assert commands['Wind'][commands['Wind'].index('--start')+1] == '202610120100'

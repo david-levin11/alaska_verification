@@ -605,6 +605,8 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
 
     If model == "nbmqmd", apply special logic to match 24-hr APCP percentiles.
     """
+    from nbm_deterministic import ELEMENTS, deterministic_ranges
+    deterministic_qmd = model == "nbm" and element in ELEMENTS
     print(f"  > Downloading subset for {os.path.basename(remote_url)}")
     os.makedirs(os.path.dirname(local_filename), exist_ok=True)
 
@@ -621,6 +623,9 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
     finally:
         r.close()
     matched_ranges = {}
+
+    if deterministic_qmd:
+        matched_ranges = deterministic_ranges(lines, element, parse_forecast_hour(remote_url))
 
     # Special handling for NBM QPF percentiles
     if model == "nbmqmd" or model == 'nbmqmd_exp':
@@ -752,7 +757,7 @@ def download_subset(remote_url, local_filename, search_strings, model, element,
         if require_all_matches and len(matched_vars) != len(search_strings):
             print(f'      ⚠️ Not all variables matched! Found: {matched_vars}. Skipping {remote_url}.')
             return None
-    if model in ["nbm", "nbm_exp"] and element not in config.PROBABILISTIC_ELEMENTS[model]:
+    if model in ["nbm", "nbm_exp"] and element not in config.PROBABILISTIC_ELEMENTS[model] and not deterministic_qmd:
         # Extract forecast hour from filename (e.g., f060)
         base = os.path.basename(remote_url)
         fcst_match = re.search(r"f(\d{3})", base)
@@ -890,6 +895,7 @@ def parse_date_and_time_from_url(remote_url, model):
 
 def extract_model_subset_parallel(file_urls, station_df, search_strings, element, model, config):
     from grid_utils import grid_coordinates, outside_hawaii_grid
+    from nbm_deterministic import ELEMENTS, decode_field
     rename_map = config.HERBIE_RENAME_MAP[element][model]
     conversion_map = config.HERBIE_UNIT_CONVERSIONS[element].get(model, {})
     print(f"Conversion map is: {conversion_map}")
@@ -975,7 +981,29 @@ def extract_model_subset_parallel(file_urls, station_df, search_strings, element
     station_index_cache = {}  # move it here so it's scoped properly
     all_records = []
     # probabilistic data is processed differently due to issues with cfgrib
-    if model not in  ['nbmqmd', 'nbmqmd_exp'] and element not in config.PROBABILISTIC_ELEMENTS[model]:
+    if model == 'nbm' and element in ELEMENTS:
+        for local_file in downloaded_files:
+            lead = parse_forecast_hour(local_file)
+            with pygrib.open(local_file) as messages:
+                fields = list(messages)
+                if len(fields) != 1:
+                    raise ValueError(f'Expected one deterministic {element} field in {local_file}')
+                message = fields[0]
+                reference, endpoint, values = decode_field(message, element, lead)
+                lats, lons = message.latlons()
+                lats, lons, grid_id = grid_coordinates(lats, lons)
+                values = values.reshape(lats.shape)
+                for _, row in station_df.iterrows():
+                    stid, lat, lon = row['stid'], row['latitude'], row['longitude']
+                    key = (grid_id, stid, lat, lon)
+                    if key not in station_index_cache:
+                        station_index_cache[key] = ll_to_index(lat, lon, lats, lons)
+                    iy, ix = station_index_cache[key]
+                    if getattr(config, 'REGION', 'alaska') == 'hawaii' and outside_hawaii_grid(lat, lon, lats, lons, iy, ix):
+                        continue
+                    all_records.append(dict(station_id=stid, init_time=reference,
+                        valid_time=endpoint, forecast_hour=lead, **{element: float(values[iy, ix])}))
+    elif model not in  ['nbmqmd', 'nbmqmd_exp'] and element not in config.PROBABILISTIC_ELEMENTS[model]:
         print(f"{element} not a probabilistic element for {model}")
         for i, local_file in enumerate(downloaded_files):
             print(f"Now processing {local_file}...")

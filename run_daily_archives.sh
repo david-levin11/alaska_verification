@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Wrapper to call the archiver per model/element on a daily UTC window.
 # Special hours:
-#   - nbm, nbm_exp: START=YYYYmmdd0100, END=(YYYYmmdd+1)0100
+#   - nbm core / nbm_exp: START=YYYYmmdd0100, END=(YYYYmmdd+1)0100
+#   - nbm deterministic QMD elements: same 00Z date window as nbmqmd
 #   - others:       START=YYYYmmdd0000, END=(YYYYmmdd+1)0000
 #
 # Usage:
@@ -58,7 +59,7 @@ case "$SOURCE_STORAGE" in
 esac
 
 declare -A AVAILABLE_FIELDS=(
-  [nbm]="Wind snow6hr snow24hr snow48hr snow72hr"
+  [nbm]="Wind snow6hr snow24hr snow48hr snow72hr precip6hr precip24hr maxt mint"
   [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust rh"
   [hrrr]="Wind rh precip6hr snow6hr temp2m"
   [rrfs]="Wind rh precip6hr snow6hr temp2m"
@@ -170,7 +171,7 @@ for model in "${MODEL_LIST[@]}"; do
       START="${GLOBAL_START}"
       END="${GLOBAL_END}"
     else
-      if [[ "$model" == "nbm" || "$model" == "nbm_exp" ]]; then
+      if [[ "$model" == "nbm_exp" || ( "$model" == "nbm" && ! "$element" =~ ^(precip6hr|precip24hr|maxt|mint)$ ) ]]; then
         START="$(date -u -d "${BASE_DATE} 01:00" +%Y%m%d%H)00"
         END="$(date -u -d "${BASE_DATE} +1 day 01:00" +%Y%m%d%H)00"
       else

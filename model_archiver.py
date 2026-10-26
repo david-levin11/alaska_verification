@@ -88,6 +88,8 @@ class ModelArchiver(Archiver):
             print(f"  {stid}: {(station_ids == stid).any()}")
 
     def fetch_file_list(self, start, end):
+        from nbm_deterministic import source_model
+        source = source_model(self.config.MODEL, self.wxelement)
         if self.config.MODEL == "rrfsens":
             return {member: get_model_file_list(
                 start=start, end=end,
@@ -101,10 +103,10 @@ class ModelArchiver(Archiver):
             start=start,
             end=end,
             fcst_hours=self.config.HERBIE_FORECASTS[self.config.MODEL][self.wxelement],
-            cycle=self.config.HERBIE_CYCLES[self.config.MODEL],
-            base_url=self.config.MODEL_URLS[self.config.MODEL],
+            cycle=self.config.HERBIE_CYCLES[source],
+            base_url=self.config.MODEL_URLS[source],
             element=self.wxelement,
-            model=self.config.MODEL,
+            model=source,
             domain=self.config.HERBIE_DOMAIN,
         )
 

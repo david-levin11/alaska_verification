@@ -1,5 +1,48 @@
 # Model backfills and recovery
 
+## Deterministic NBM forecasts from QMD
+
+Use `--model nbm` with `precip6hr`, `precip24hr`, `maxt`, or `mint` to archive
+the unannotated deterministic interval field from the operational QMD files.
+NBMQMD continues to archive the percentile fields separately. The deterministic
+selection excludes percentile levels, exceedance probabilities, ensemble means,
+and standard deviations, and matches the exact 6/24/18/18-hour interval.
+For example, at f036, precip6hr selects `30-36 hour acc fcst`, while precip24hr
+selects `12-36 hour acc fcst`; `24-36` is a 12-hour amount and is not selected.
+
+Local files use the normal regional NBM paths:
+
+| Element | Alaska output | Value column / units |
+| --- | --- | --- |
+| precip6hr | `model/nbm/precip6hr/YYYY_MM_archive.parquet` | `precip6hr`, inches |
+| precip24hr | `model/nbm/precip24hr/YYYY_MM_archive.parquet` | `precip24hr`, inches |
+| maxt | `model/nbm/maxt/YYYY_MM_archive.parquet` | `maxt`, degrees F |
+| mint | `model/nbm/mint/YYYY_MM_archive.parquet` | `mint`, degrees F |
+
+Hawaii uses `hawaii/model/nbm/...`. Forecast leads and cycle spacing are copied
+from NBMQMD: precip6hr f006 through f120 every 6 hours; precip24hr f024, f030,
+f036, then f048 through f168 every 12 hours; temperatures f018 through f174
+every 12 hours. A 00Z start uses 00/12Z source cycles, just like NBMQMD's current
+12-hour schedule. Not every requested file contains both maximum and minimum
+temperature intervals; absent fields are reported and skipped, never replaced
+by the opposite temperature statistic or an instantaneous value.
+
+Initialization and valid times come from the GRIB reference and explicit interval
+endpoint, rather than inferring the reference from `pygrib.validDate`. Daily
+checkpoints and monthly deduplication apply normally. The daily wrapper now
+includes these four elements under NBM and uses the QMD 00Z date window for them;
+NBM core wind and snow keep their existing 01/07/13/19Z schedule.
+
+Example (all times UTC):
+
+```shell
+python run_model_archiver.py --region alaska --model nbm --element maxt --start 202610250000 --end 202610251200 --local
+```
+
+For these four QMD-sourced elements, use 00/06/12/18 UTC start/end hours, not
+NBM core's one-hour-offset cycles. Existing NBMQMD archives are not converted
+or moved; the deterministic values must be extracted from their source fields.
+
 ## Standardized local NDFD layout
 
 New local NDFD writes use `model/ndfd/<element>/YYYY_MM_archive.parquet`, or

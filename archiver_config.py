@@ -642,6 +642,20 @@ HERBIE_FORECASTS["rrfsens"] = {field: list(range(3, 61, 3))
 HERBIE_CYCLES["rrfsens"] = "6h"
 S3_URLS["rrfsens"] = "s3://alaska-verification/rrfsens/"
 
+# These deterministic fields come from QMD, but retain NBM archive identity.
+from nbm_deterministic import ELEMENTS as NBM_DETERMINISTIC_QMD_ELEMENTS
+for _element in NBM_DETERMINISTIC_QMD_ELEMENTS:
+    if _element not in AVAILABLE_FIELDS['nbm']:
+        AVAILABLE_FIELDS['nbm'].append(_element)
+    HERBIE_FORECASTS['nbm'][_element] = list(HERBIE_FORECASTS['nbmqmd'][_element])
+    if _element in PROBABILISTIC_ELEMENTS['nbm']:
+        PROBABILISTIC_ELEMENTS['nbm'].remove(_element)
+    HERBIE_XARRAY_STRINGS[_element]['nbm'] = list(HERBIE_XARRAY_STRINGS[_element]['nbmqmd'])
+    HERBIE_REQUIRED_PHRASES[_element]['nbm'] = list(HERBIE_XARRAY_STRINGS[_element]['nbmqmd'])
+    HERBIE_EXCLUDE_PHRASES[_element]['nbm'] = ['% level', 'prob', 'ens mean', 'ens std dev']
+    HERBIE_RENAME_MAP[_element]['nbm'] = {'tp' if _element.startswith('precip') else 't2m': _element}
+    HERBIE_UNIT_CONVERSIONS[_element]['nbm'] = {}
+
 # Region selection is explicit at entry points; importing config defaults to Alaska.
 from copy import deepcopy
 from region_config import normalize_region
@@ -672,7 +686,7 @@ def configure_region(region='alaska'):
         AVAILABLE_FIELDS.pop('hrrr', None)
         for model in AVAILABLE_FIELDS:
             AVAILABLE_FIELDS[model] = [f for f in AVAILABLE_FIELDS[model] if not f.startswith('snow')]
-        AVAILABLE_FIELDS['nbm'] = ['Wind']  # Other non-snow percentiles use NBMQMD.
+        AVAILABLE_FIELDS['nbm'] = ['Wind', *NBM_DETERMINISTIC_QMD_ELEMENTS]
         globals()['HERBIE_MODELS'] = list(AVAILABLE_FIELDS)
         for model in ('nbm', 'nbm_exp', 'nbmqmd', 'nbmqmd_exp'):
             HERBIE_PRODUCTS[model] = 'hi'

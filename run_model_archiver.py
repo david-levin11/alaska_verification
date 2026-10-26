@@ -19,8 +19,11 @@ def run_monthly_archiving(start, end, model_name, element, use_local, region='al
 
     # Normalize to match config keys
     model = model_name.lower()
+    from nbm_deterministic import ELEMENTS, source_model
     if element.lower() == "wind":
         element = element.capitalize()  # "wind" → "Wind", etc.
+    elif element.lower() in ELEMENTS:
+        element = element.lower()
     # Validate
     if model not in config.HERBIE_MODELS:
         print(f"❌ Model '{model}' not recognized. Valid options: {config.HERBIE_MODELS}")
@@ -30,12 +33,13 @@ def run_monthly_archiving(start, end, model_name, element, use_local, region='al
         print('Check spelling and capitalization or set up archiver for your requested variable')
         sys.exit(1)
         # Checking for correct NBM run time if necessary
+    source = source_model(model, element)
     if model in ['nbm', 'nbm_exp', 'nbmqmd', 'nbmqmd_exp']:
-        if start.hour not in config.NBM_START_HOURS[model]:
-            print(f"Start hour for {model} must be one of {config.NBM_START_HOURS[model]}")
+        if start.hour not in config.NBM_START_HOURS[source]:
+            print(f"Start hour for {model} {element} must be one of {config.NBM_START_HOURS[source]}")
             sys.exit(1)
-        if end.hour not in config.NBM_START_HOURS[model]:
-            print(f"End hour for {model} must be one of {config.NBM_START_HOURS[model]}")
+        if end.hour not in config.NBM_START_HOURS[source]:
+            print(f"End hour for {model} {element} must be one of {config.NBM_START_HOURS[source]}")
             sys.exit(1)
 
     if use_local:
@@ -108,7 +112,7 @@ def run_monthly_archiving(start, end, model_name, element, use_local, region='al
         os.makedirs(config.TMP, exist_ok=True)
 
         # Keep cycle alignment across calendar month boundaries.
-        cycle = pd.Timedelta(config.HERBIE_CYCLES[model])
+        cycle = pd.Timedelta(config.HERBIE_CYCLES[source])
         current = current + ((chunk_end - current) // cycle + 1) * cycle
 
 if __name__ == "__main__":
