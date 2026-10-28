@@ -135,3 +135,44 @@ python -m unittest discover -s tests -p test_download_retry.py
 python -m unittest discover -s tests -p test_daily_checkpoints.py
 python -m unittest discover -s tests -p test_precip_subset_selection.py
 ```
+
+
+## Rolling precipitation observations
+
+Both `run_obs_archiver.py` and the direct `obs_archiver.py` entry point request
+`precip24hr` totals at nominal endpoints 00/06/12/18 UTC. For each station batch,
+four offset `pmode=intervals&interval=24` requests return independent daily totals
+for those endpoint hours over the requested range. The archiver stores each
+returned `total` directly; it does not sum six-hour amounts. Each offset request
+starts 24 hours before its first requested endpoint and ends exactly at its
+last requested endpoint, so the first day is covered without partial trailing
+intervals. `precip6hr` uses one request with `interval=6`.
+
+`start_time`/`end_time` retain actual report boundaries (for example 23:53Z
+rather than 00Z); `first_report`/`last_report` repeat those explicit bounds.
+`nominal_start_time`/`nominal_end_time` identify the requested UTC window using
+the API's one-based `interval` index and the request start. Monthly outputs are
+partitioned by the nominal endpoint's calendar month. The actual duration and
+both actual boundaries must fit the requested window within the configured
+API interval tolerance (30 minutes by default). Missing, negative, nonfinite,
+short, shifted or conflicting totals are excluded. Identical repeated reports
+are deduplicated. API errors exhausted after retries fail the chunk instead of
+silently omitting a station batch. These checks also apply to `precip6hr`.
+
+Existing `precip24hr` files are not automatically repaired. Pause concurrent
+writers, back up the entire affected `model/obs/precip24hr/` directory (or its
+Hawaii equivalent), and rebuild into an empty directory. Appending alone cannot
+remove invalid legacy totals. Retain the originals for comparison. Example:
+
+```shell
+python run_obs_archiver.py --region alaska --element precip24hr --start "2026-05-01 00:00" --end "2026-10-28 00:00" --local
+```
+
+Use the desired inclusive nominal endpoint range; the archiver requests its
+own preceding accumulation period, so do not shift the command-line start back a day. Confirm four
+nominal endpoint hours per complete day for stations with sufficient reports,
+inspect actual durations, and check for duplicate station/accumulation/endpoint
+keys before replacing the verification app's observation copies. Stations with
+missing or inconsistent reports can legitimately have fewer endpoints. The code
+has offline response and Parquet regression tests; validate representative live
+stations before treating a historical rebuild as complete.

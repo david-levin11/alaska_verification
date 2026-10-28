@@ -21,11 +21,14 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
     else:
         config.USE_CLOUD_STORAGE = True
 
-    # Temperature values can change when a window is fetched again. Identify
-    # the observation by station/date/window, not by its value or metadata.
+    # Values and metadata can change when a window is fetched again. Existing
+    # precipitation files already have end_time, so use that key rather than
+    # a new column that would be null for every legacy row during a merge.
     dedup_columns = (
         ["stid", "date", "window_start", "window_end"]
-        if element in ("maxt", "mint") else None
+        if element in ("maxt", "mint") else
+        ["stid", "accum_hours", "end_time"]
+        if element in ("precip6hr", "precip24hr") else None
     )
 
     config.ELEMENT = element
@@ -36,7 +39,7 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
         f.close()
     current = start
     while current <= end:
-        chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+        chunk_end = (current.to_period("M").end_time).floor("min")
         if chunk_end > end:
             chunk_end = end
 
@@ -44,7 +47,7 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
         if element == "Wind":
             df = archiver.fetch_observations(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
         elif element == "precip24hr":
-            df = archiver.fetch_precip_rolling(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"),accum_hours=24, step_hours=12)
+            df = archiver.fetch_precip_rolling(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"),accum_hours=24, step_hours=6)
         elif element == "precip6hr":
             df = archiver.fetch_precip_rolling(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"),accum_hours=6, step_hours=6)
         elif element == "maxt":
@@ -77,7 +80,7 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
         #shutil.rmtree(config.TMP, ignore_errors=True)
         #os.makedirs(config.TMP, exist_ok=True)
 
-        current += relativedelta(months=1)
+        current = chunk_end + pd.Timedelta(minutes=1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Observation Archiver")

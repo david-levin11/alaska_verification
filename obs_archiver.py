@@ -99,92 +99,83 @@ class ObsArchiver(Archiver):
         start_time,
         end_time,
         *,
-        accum_hours,            # e.g., 6 or 24
-        step_hours,             # e.g., 6 (for 6h) or 12 (for 24h rolling every 12)
-        units="english",        # "english" (in) or "metric" (mm)
+        accum_hours,
+        step_hours,
+        units="english",
         interval_window="0.5,0.5",
     ):
+        """Fetch direct accumulation totals at UTC endpoints every step_hours.
+
+        For 24-hour totals every six hours, four offset interval=24 requests
+        cover the requested range. Synoptic computes every total independently;
+        the archiver never sums shorter precipitation intervals. Each request
+        starts one accumulation before its first requested endpoint.
         """
-        Rolling precipitation accumulations using Synoptic's precipitation service.
-
-        Strategy:
-        1) Request pmode=intervals with interval=step_hours across [start,end].
-        2) For each station, sort intervals by end_time.
-        3) Rolling sum over k = accum_hours // step_hours intervals.
-
-        Returns DataFrame with:
-        stid, lat, lon, elev, accum_hours, step_hours,
-        start_time, end_time, precip_total, precip_units, NWSZONE, NWSCWA
-        """
-        if accum_hours % step_hours != 0:
-            raise ValueError("accum_hours must be an integer multiple of step_hours")
-        k = accum_hours // step_hours
-
+        if (accum_hours <= 0 or step_hours <= 0 or accum_hours % step_hours != 0
+                or int(accum_hours) != accum_hours or int(step_hours) != step_hours):
+            raise ValueError("accum_hours must be a positive integer multiple of step_hours")
+        requested_start = pd.to_datetime(self._fmt_time(start_time), format="%Y%m%d%H%M", utc=True)
+        requested_end = pd.to_datetime(self._fmt_time(end_time), format="%Y%m%d%H%M", utc=True)
+        if requested_start > requested_end:
+            raise ValueError("start_time must not be after end_time")
+        duration = pd.Timedelta(hours=accum_hours)
+        first_endpoint = requested_start.ceil(f"{step_hours}h")
         base_url = "https://api.synopticdata.com/v2/stations/precip"
         units_param = "precip|in" if units.lower() == "english" else "precip|mm"
-
         parts = []
-        for chunk in self._chunk_station_ids(station_ids):
-            attempt, wait = 0, self.initial_wait
-            while attempt < self.max_retries:
-                try:
-                    params = {
-                        "token": self.api_token,
-                        "stid": ",".join(chunk),
-                        "start": self._fmt_time(start_time),
-                        "end": self._fmt_time(end_time),
-                        "pmode": "intervals",
-                        "interval": str(int(step_hours)),   # step cadence the API will return
-                        "obtimezone": "utc",
-                        "interval_window": interval_window,
-                        "units": units_param,
-                        "output": "json",
-                    }
-                    r = requests.get(base_url, params=params, timeout=60)
-                    r.raise_for_status()
-                    js = r.json()
-                    df_int = self._process_precip_json_for_rolling(js)  # helper below
-                    if not df_int.empty:
-                        parts.append(df_int)
-                    break
-                except Exception as e:
-                    print(f"Retry {attempt+1}/{self.max_retries} (stations {chunk[:3]}...): {e}")
-                    attempt += 1
-                    sleep(wait)
-                    wait *= 2
+        for offset in range(int(accum_hours // step_hours)):
+            first = first_endpoint + pd.Timedelta(hours=offset * step_hours)
+            if first > requested_end:
+                break
+            query_start = first - duration
+            query_end = first + ((requested_end - first) // duration) * duration
+            for chunk in self._chunk_station_ids(station_ids):
+                attempt, wait = 0, self.initial_wait
+                while attempt < self.max_retries:
+                    try:
+                        params = {
+                            "token": self.api_token,
+                            "stid": ",".join(chunk),
+                            "start": self._fmt_time(query_start),
+                            "end": self._fmt_time(query_end),
+                            "pmode": "intervals",
+                            "interval": str(int(accum_hours)),
+                            "obtimezone": "utc",
+                            "interval_window": interval_window,
+                            "units": units_param,
+                            "output": "json",
+                        }
+                        r = requests.get(base_url, params=params, timeout=60)
+                        r.raise_for_status()
+                        js = r.json()
+                        code = str(js.get("SUMMARY", {}).get("RESPONSE_CODE", ""))
+                        if code == "2":
+                            break
+                        if code != "1" or not isinstance(js.get("STATION"), list):
+                            raise ValueError(f"Unexpected Synoptic precipitation response (code={code or 'missing'})")
+                        df_int = self._process_precip_json_for_rolling(
+                            js, query_start=query_start, accum_hours=accum_hours)
+                        if not df_int.empty:
+                            parts.append(df_int)
+                        break
+                    except Exception as e:
+                        # Do not print request URLs/exceptions that can contain
+                        # the API token in their query string.
+                        print(f"Retry {attempt+1}/{self.max_retries} for precipitation "
+                              f"(stations {chunk[:3]}..., endpoint hour {first.hour:02}Z; {type(e).__name__})")
+                        attempt += 1
+                        if attempt >= self.max_retries:
+                            raise RuntimeError("Synoptic precipitation request exhausted retries") from e
+                        sleep(wait)
+                        wait *= 2
 
-        if not parts:
-            return pd.DataFrame(
-                columns=["stid","lat","lon","elev","accum_hours","step_hours",
-                         "start_time","end_time","precip_total","precip_units","NWSZONE","NWSCWA"]
-            )
+        from precip_windows import validate_precip_windows
+        intervals = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+        return validate_precip_windows(intervals, requested_start, requested_end,
+            accum_hours=accum_hours, step_hours=step_hours,
+            interval_window=interval_window)
 
-
-        df = pd.concat(parts, ignore_index=True)
-        df = df.sort_values(["stid", "end_time"]).reset_index(drop=True)
-        df["interval_precip"] = pd.to_numeric(df["interval_precip"], errors="coerce")
-
-        k = accum_hours // step_hours
-        df["precip_total"] = (
-            df.groupby("stid", sort=False)["interval_precip"]
-            .transform(lambda s: s.rolling(window=k, min_periods=k).sum())
-        )
-
-        out = df.loc[df["precip_total"].notna()].copy()
-        out["accum_hours"] = accum_hours
-        out["step_hours"] = step_hours
-        out["start_time"] = out["end_time"] - pd.to_timedelta(accum_hours, unit="h")
-
-        # if you DON'T want to keep the interval values, drop them here:
-        # out = out.drop(columns=["interval_precip"])
-
-        cols = ["stid","lat","lon","elev","accum_hours","step_hours",
-                "start_time","end_time","precip_total","precip_units","NWSZONE","NWSCWA"]
-        out = out.loc[:, cols].reset_index(drop=True)
-        return out
-
-
-    def _process_precip_json_for_rolling(self, raw_json):
+    def _process_precip_json_for_rolling(self, raw_json, *, query_start, accum_hours):
         stations = raw_json.get("STATION", []) or []
         units = (raw_json.get("UNITS", {}) or {}).get("precipitation", None)
         rows = []
@@ -193,18 +184,35 @@ class ObsArchiver(Archiver):
             obs = ((st.get("OBSERVATIONS") or {}).get("precipitation") or [])
             zone_info = getattr(self, "station_metadata", {}).get(stid, {})
             for rec in obs:
+                # Synoptic's interval is the one-based position in this
+                # request, including missing slots. Do not infer the requested
+                # endpoint by rounding a potentially incomplete last_report.
+                try:
+                    index = float(rec.get("interval"))
+                    nominal_end = (query_start + pd.Timedelta(hours=int(index)*accum_hours)
+                                   if index.is_integer() and index > 0 else pd.NaT)
+                except (TypeError, ValueError, OverflowError):
+                    nominal_end = pd.NaT
                 rows.append({
                     "stid": stid,
                     "lat": st.get("LATITUDE"),
                     "lon": st.get("LONGITUDE"),
                     "elev": st.get("ELEVATION"),
-                    "end_time": pd.to_datetime(rec.get("last_report")),
-                    "interval_precip": rec.get("total"),     # <-- renamed
+                    "first_report": pd.to_datetime(rec.get("first_report"), utc=True, errors="coerce"),
+                    "last_report": pd.to_datetime(rec.get("last_report"), utc=True, errors="coerce"),
+                    "nominal_end_time": nominal_end,
+                    "report_type": rec.get("report_type"),
+                    "interval_precip": rec.get("total"),
                     "precip_units": units,
                     "NWSZONE": zone_info.get("zone"),
                     "NWSCWA": zone_info.get("cwa"),
                 })
-        return pd.DataFrame(rows)
+        frame = pd.DataFrame(rows)
+        if not frame.empty:
+            for column in ("first_report", "last_report", "nominal_end_time"):
+                frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce")
+            frame["interval_precip"] = pd.to_numeric(frame["interval_precip"], errors="coerce")
+        return frame
 
     @staticmethod
     def _to_utc_timestamp(val):
@@ -575,7 +583,7 @@ if __name__ == "__main__":
     stations = obs_archiver.get_station_metadata()
     print(stations)
     if config.ELEMENT == "precip24hr":
-        df_obs = obs_archiver.fetch_precip_rolling(stations, config.OBS_START, config.OBS_END, accum_hours=24, step_hours=12)
+        df_obs = obs_archiver.fetch_precip_rolling(stations, config.OBS_START, config.OBS_END, accum_hours=24, step_hours=6)
     elif config.ELEMENT == "precip6hr":
         df_obs = obs_archiver.fetch_precip_rolling(stations, config.OBS_START, config.OBS_END, accum_hours=6, step_hours=6)
     elif config.ELEMENT == "Wind":
