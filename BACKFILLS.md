@@ -150,8 +150,10 @@ intervals. `precip6hr` uses one request with `interval=6`.
 
 `start_time`/`end_time` retain actual report boundaries (for example 23:53Z
 rather than 00Z); `first_report`/`last_report` repeat those explicit bounds.
-`nominal_start_time`/`nominal_end_time` identify the requested UTC window using
-the API's one-based `interval` index and the request start. Monthly outputs are
+`nominal_start_time`/`nominal_end_time` identify the requested UTC window by
+aligning `last_report` to the accumulation grid anchored by the request start.
+The API `interval` ordinal is not treated as a calendar slot: numbering may
+be compacted when an interval is omitted. Monthly outputs are
 partitioned by the nominal endpoint's calendar month. The actual duration and
 both actual boundaries must fit the requested window within the configured
 API interval tolerance (30 minutes by default). Missing, negative, nonfinite,
@@ -226,3 +228,26 @@ July 1 QPF and MaxT GRIBs were also loaded from four workers and extracted to
 Parquet in the Linux test environment. The original Windows scanner crash
 cannot be reproduced or ruled out for every library build by those tests;
 retry the failing July chunk after deployment and retain its log/exit status.
+
+
+### Monthly precipitation gaps and endpoint alignment
+
+The first direct-total implementation used the API's `interval` ordinal as a
+fixed offset from the request start. This can discard all subsequent valid
+reports after a missing interval if the response numbers only returned rows.
+One-day tests did not expose this failure. A September regression reproduces
+the uploaded PAJN pattern (76 rows) from only two brief gaps, then verifies
+that the corrected mapper keeps the remaining 118 independent valid windows.
+That is a synthetic regression, not a claim that PAJN's live September archive
+will necessarily contain 118 rows.
+
+The mapper now uses the actual last_report timestamp and the request's offset
+accumulation grid; first_report, last_report and duration are still validated.
+Both sparse and compact interval numbering work. The same fix applies to
+precip6hr because it uses this mapper too. Re-request affected monthly OBS
+ranges after updating. Files produced by the direct-total implementation can
+be backed up and refetched to merge missing windows; earlier legacy files
+without validated nominal endpoints should still be rebuilt as described above.
+A retained monthly Parquet alone cannot establish which absent totals were
+available from Synoptic; compare a rebuilt month with independent daily calls
+or the raw API results before declaring complete coverage.

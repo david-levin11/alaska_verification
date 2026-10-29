@@ -11,8 +11,8 @@ def validate_precip_windows(intervals, start, end, *, accum_hours, step_hours,
                             interval_window="0.5,0.5"):
     """Retain independently returned totals only when actual bounds fit.
 
-    The requested window comes from the API's interval position and request
-    start. Both actual boundaries and the actual duration must agree with that
+    The requested window is aligned from the actual last_report to the grid
+    anchored by the request start. Both boundaries and duration must agree with that
     window within the configured interval tolerance (30 minutes by default).
     Identical repeated rows are deduplicated; conflicting totals for one
     station/nominal endpoint are excluded rather than arbitrarily selected.

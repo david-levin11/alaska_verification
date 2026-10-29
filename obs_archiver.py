@@ -130,22 +130,23 @@ class ObsArchiver(Archiver):
             obs = ((st.get("OBSERVATIONS") or {}).get("precipitation") or [])
             zone_info = getattr(self, "station_metadata", {}).get(stid, {})
             for rec in obs:
-                # Synoptic's interval is the one-based position in this
-                # request, including missing slots. Do not infer the requested
-                # endpoint by rounding a potentially incomplete last_report.
-                try:
-                    index = float(rec.get("interval"))
-                    nominal_end = (query_start + pd.Timedelta(hours=int(index)*accum_hours)
-                                   if index.is_integer() and index > 0 else pd.NaT)
-                except (TypeError, ValueError, OverflowError):
-                    nominal_end = pd.NaT
+                # An interval ordinal may be compacted when reports are
+                # omitted. It is not a reliable calendar position. Match the
+                # actual endpoint to this request's accumulation grid instead;
+                # validation below still checks both bounds and duration.
+                last_report = pd.to_datetime(rec.get("last_report"), utc=True, errors="coerce")
+                period = pd.Timedelta(hours=accum_hours)
+                nominal_end = pd.NaT
+                if pd.notna(last_report):
+                    slot = (last_report - query_start + period / 2) // period
+                    nominal_end = query_start + slot * period
                 rows.append({
                     "stid": stid,
                     "lat": st.get("LATITUDE"),
                     "lon": st.get("LONGITUDE"),
                     "elev": st.get("ELEVATION"),
                     "first_report": pd.to_datetime(rec.get("first_report"), utc=True, errors="coerce"),
-                    "last_report": pd.to_datetime(rec.get("last_report"), utc=True, errors="coerce"),
+                    "last_report": last_report,
                     "nominal_end_time": nominal_end,
                     "report_type": rec.get("report_type"),
                     "interval_precip": rec.get("total"),

@@ -86,19 +86,52 @@ def test_non_aligned_request_is_trimmed_to_requested_endpoints(source):
     assert df.nominal_end_time.dt.hour.tolist() == [6,12]
 
 
-def test_missing_daily_interval_keeps_later_interval_positions(source):
+@pytest.mark.parametrize('renumber', [False, True])
+@pytest.mark.parametrize('accum_hours', [6,24])
+def test_missing_daily_interval_keeps_later_interval_positions(source, renumber, accum_hours):
     archiver, _, mutate = source
     def remove_middle(rows):
-        return [row for row in rows if row['interval'] != 2]
+        kept = [row for row in rows if row['interval'] != 2]
+        if renumber:
+            for number, row in enumerate(kept, 1):
+                row['interval'] = number
+        return kept
     mutate[0] = remove_middle
-    df = fetch(archiver, '202606010000', '202606032359')
-    assert df.nominal_end_time.dt.day.tolist() == [1]*4+[3]*4
-    assert df.precip_total.tolist() == [4.37,5.37,6.37,7.37,12.37,13.37,14.37,15.37]
+    df = fetch(archiver, '202606010000', '202606032359', accum_hours=accum_hours)
+    if accum_hours == 24:
+        assert df.nominal_end_time.dt.day.tolist() == [1]*4+[3]*4
+        assert df.precip_total.tolist() == [4.37,5.37,6.37,7.37,12.37,13.37,14.37,15.37]
+    else:
+        expected = pd.date_range('2026-06-01', '2026-06-03 18:00', freq='6h', tz='UTC').delete(1)
+        assert df.nominal_end_time.tolist() == expected.tolist()
+
+
+def test_monthly_request_recovers_after_brief_gaps_at_pajn_endpoints(source):
+    archiver, _, mutate = source
+    def brief_gaps(rows):
+        kept = []
+        for row in rows:
+            endpoint = pd.Timestamp(row['last_report']) + pd.Timedelta(minutes=7)
+            if (endpoint.day, endpoint.hour) in ((12,6), (6,18)):
+                continue
+            kept.append(row)
+        for number, row in enumerate(kept, 1):
+            row['interval'] = number
+        return kept
+    mutate[0] = brief_gaps
+    df = fetch(archiver, '202609010000', '202609302359')
+    # Reproduce the uploaded file's 76-row PAJN pattern under the old mapping.
+    # Two missing totals must not discard the 42 later, independently valid ones.
+    assert len(df) == 118
+    assert df.groupby(df.nominal_end_time.dt.hour).size().to_dict() == {0:30,6:29,12:30,18:29}
+    daily = pd.concat([fetch(archiver, f'202609{day:02}0000', f'202609{day:02}2359')
+                       for day in range(1,31)], ignore_index=True)
+    pd.testing.assert_frame_equal(df, daily)
 
 
 @pytest.mark.parametrize('damage', ['missing', 'duplicate', 'conflict', 'late_start', 'early_start',
                                   'short', 'missing_start', 'missing_end', 'null', 'negative',
-                                  'infinite', 'wrong_index', 'missing_index', 'late_end'])
+                                  'infinite', 'late_end'])
 def test_bad_direct_total_does_not_invalidate_other_endpoints(source, damage):
     archiver, _, mutate = source
     def damage_rows(rows):
@@ -116,14 +149,27 @@ def test_bad_direct_total_does_not_invalidate_other_endpoints(source, damage):
         elif damage == 'null': row['total'] = None
         elif damage == 'negative': row['total'] = -1
         elif damage == 'infinite': row['total'] = float('inf')
-        elif damage == 'wrong_index': row['interval'] = 2
-        elif damage == 'missing_index': row.pop('interval')
         elif damage == 'late_end': row['last_report'] = str(pd.Timestamp(row['last_report'])+pd.Timedelta(hours=1))
         return rows
     mutate[0] = damage_rows
     df = fetch(archiver)
     assert len(df) == (4 if damage == 'duplicate' else 3)
     assert df.nominal_end_time.dt.hour.tolist() == ([0,6,12,18] if damage == 'duplicate' else [6,12,18])
+
+
+@pytest.mark.parametrize('ordinal', [None, 0, 2, 'not-a-number'])
+def test_calendar_alignment_does_not_depend_on_interval_ordinal(source, ordinal):
+    archiver, _, mutate = source
+    def ordinals(rows):
+        for row in rows:
+            if ordinal is None:
+                row.pop('interval')
+            else:
+                row['interval'] = ordinal
+        return rows
+    mutate[0] = ordinals
+    df = fetch(archiver)
+    assert df.nominal_end_time.dt.hour.tolist() == [0,6,12,18]
 
 
 def test_zero_totals_are_valid(source):
