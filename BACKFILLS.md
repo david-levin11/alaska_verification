@@ -176,3 +176,30 @@ keys before replacing the verification app's observation copies. Stations with
 missing or inconsistent reports can legitimately have fewer endpoints. The code
 has offline response and Parquet regression tests; validate representative live
 stations before treating a historical rebuild as complete.
+
+
+## NDFD regional station coverage
+
+Every NDFD element now fetches a fresh regional station inventory using the
+same discovery function as OBS. Alaska uses the mainland/western Aleutian
+bounding boxes, the dateline endpoint workaround and independent local
+coordinate validation. No network, active-status, observed-variable or
+precipitation-sensor filter restricts model extraction. Hawaii retains its
+state selector and includes all statuses. Station IDs remain separate even
+when two IDs describe one physical site.
+
+Legacy `obs/alaska_{element}_obs_metadata.csv` files (and Hawaii equivalents)
+are no longer read by NDFD. They can remain in place. Each NDFD invocation
+requires `SYNOPTIC_API_KEY` and writes a diagnostic snapshot to
+`obs/ndfd_{element}_model_sites.csv` (under `hawaii/obs/` for Hawaii). These
+snapshots are never reused as selection caches. A locked snapshot produces a
+warning; API failures or an empty usable inventory stop the run rather than
+silently falling back to a restricted or partial list.
+
+Pull the complete repository update, test a single day and compare its station
+IDs with the OBS inventory before starting a historical backfill. Existing
+Parquet archives are unchanged by the code update; rerun affected NDFD months
+to extract forecasts for previously omitted stations. Avoid concurrent writers
+to the same monthly file. This change does not modify the separate
+`ModelArchiver` station-discovery policy for NBM/HRRR/URMA/etc., and does not
+change NDFD decoding concurrency or resolve the MaxT scanner crash.

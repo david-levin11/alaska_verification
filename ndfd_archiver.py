@@ -2,59 +2,47 @@ from archiver_base import Archiver
 import os
 import sys
 import pandas as pd
+import requests
 from pathlib import Path
-from utils import get_ndfd_file_list, extract_ndfd_forecasts_parallel, create_wind_metadata, parse_metadata, create_precip_metadata
+from utils import get_ndfd_file_list, extract_ndfd_forecasts_parallel, parse_metadata
 
 class NDFDArchiver(Archiver):
     def __init__(self, config, start=None, wxelement=None):
         super().__init__(config)
         self.start = start or config.OBS_START  # fallback to config if not passed
         self.wxelement = wxelement or config.ELEMENT
-        if self.wxelement in ["precip24hr", "precip6hr", "snow6hr"]:
-            self.station_df = self.ensure_metadata_precip()
-        else:
-            self.station_df = self.ensure_metadata()
+        self.station_df = self.ensure_metadata()
 
     def ensure_metadata(self):
-        print(f"Creating metadata for {self.wxelement}")
-        metadata = f'{self.config.REGION}_{self.wxelement}_obs_metadata.csv'
-        meta_path = Path(self.config.OBS) / metadata
-        if self.wxelement == "Gust":
-            meta_element = self.config.OBS_VARS['Wind']
-        else:
-            meta_element = self.config.OBS_VARS[self.wxelement]
-        if not meta_path.exists():
-            print(f"Creating metadata from {self.config.METADATA_URL}")
-            meta_json = create_wind_metadata(
-                self.config.METADATA_URL,
-                self.config.API_KEY,
-                self.config.STATE,
-                meta_element,
-                0  # Ordinary variable metadata, not precipitation mode
-            )
-            meta_df = parse_metadata(meta_json)
-            meta_df.to_csv(meta_path, index=False)
-        else:
-            meta_df = pd.read_csv(meta_path)
-        return meta_df
+        """Use the full fresh regional inventory for every NDFD element.
+
+        Historical observations can exist at inactive stations or listings
+        without STATE tags. Legacy per-element OBS caches are never consulted.
+        Forecast extraction must not depend on a station's sensor inventory.
+        """
+        from regional_stations import discover_regional_stations
+        if not self.config.API_KEY:
+            raise ValueError("Set SYNOPTIC_API_KEY before requesting NDFD station metadata")
+        stations = discover_regional_stations(self.config.METADATA_URL,
+            self.config.API_KEY, self.config.STATE, getattr(self.config, "HFMETAR", "0"),
+            get=requests.get)
+        frame = parse_metadata({"STATION": stations})
+        if frame.empty:
+            raise ValueError("No stations with valid coordinates returned for NDFD extraction")
+        print(f"NDFD {self.wxelement}: {len(frame):,} extraction stations; fresh regional discovery")
+        # Diagnostic snapshot only. A locked CSV must not stop extraction, and
+        # this file is never read back as a station-selection cache.
+        snapshot = Path(self.config.OBS) / f"ndfd_{self.wxelement.lower()}_model_sites.csv"
+        try:
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            frame.to_csv(snapshot, index=False)
+        except OSError as error:
+            print(f"WARNING: Could not write station-list snapshot {snapshot}: {error}")
+        return frame
 
     def ensure_metadata_precip(self):
-        print(f"Creating metadata for {self.wxelement}")
-        metadata = f'{self.config.REGION}_{self.wxelement}_obs_metadata.csv'
-        meta_path = Path(self.config.OBS) / metadata
-        if not meta_path.exists():
-            print(f"Creating metadata from {self.config.METADATA_URL}")
-            meta_json = create_precip_metadata(
-                self.config.METADATA_URL,
-                self.config.API_KEY,
-                self.config.STATE,
-                self.config.NETWORK,
-            )
-            meta_df = parse_metadata(meta_json)
-            meta_df.to_csv(meta_path, index=False)
-        else:
-            meta_df = pd.read_csv(meta_path)
-        return meta_df
+        """Compatibility entry point; precipitation uses the same full inventory."""
+        return self.ensure_metadata()
 
     def fetch_file_list(self, start, end):
         return get_ndfd_file_list(start, end, self.config.NDFD_DICT, self.config.ELEMENT)
