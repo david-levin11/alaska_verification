@@ -66,6 +66,57 @@ def test_multiple_sources_merge_into_one_destination(tmp_path):
     assert not list((tmp_path / "ndfd").rglob("*.parquet"))
 
 
+@pytest.mark.parametrize("region,prefix", [("alaska", ""), ("hawaii", "hawaii/")])
+def test_rename_legacy_filename_already_in_model_directory(tmp_path, region, prefix):
+    source = tmp_path / f"{prefix}model/ndfd/precip6hr/2026_09_ndfd_precip6hr_archive.parquet"
+    destination = source.with_name("2026_09_archive.parquet")
+    write(source, [10, 20])
+    original = source.read_bytes()
+    migrate(tmp_path, region=region)
+    assert source.read_bytes() == original and not destination.exists()
+    backup = migrate(tmp_path, region=region, apply=True)
+    assert not source.exists()
+    assert destination.read_bytes() == original
+    assert (backup / source.relative_to(tmp_path)).read_bytes() == original
+    assert migrate(tmp_path, region=region, apply=True) is None
+    assert destination.read_bytes() == original
+
+
+def test_merge_both_source_layouts_with_existing_standard_archive(tmp_path):
+    old = tmp_path / "ndfd/wind/2026_09_ndfd_wind_archive.parquet"
+    moved = tmp_path / "model/ndfd/wind/2026_09_ndfd_wind_archive.parquet"
+    destination = moved.with_name("2026_09_archive.parquet")
+    write(old, [10, 20]); write(moved, [20, 30]); write(destination, [10, 40])
+    originals = {p: p.read_bytes() for p in (old, moved, destination)}
+    backup = migrate(tmp_path, apply=True)
+    assert not old.exists() and not moved.exists()
+    assert set(pd.read_parquet(destination).wind_speed_kt) == {10, 20, 30, 40}
+    assert len(pd.read_parquet(destination)) == 4
+    for path, original in originals.items():
+        assert (backup / path.relative_to(tmp_path)).read_bytes() == original
+    assert migrate(tmp_path, apply=True) is None
+
+
+def test_standard_files_are_not_touched_when_another_month_is_migrated(tmp_path):
+    standard = tmp_path / "model/ndfd/wind/2026_08_archive.parquet"
+    legacy = tmp_path / "model/ndfd/wind/2026_09_ndfd_wind_archive.parquet"
+    write(standard, [10]); write(legacy, [20])
+    original = standard.read_bytes()
+    backup = migrate(tmp_path, apply=True)
+    assert standard.read_bytes() == original
+    assert not (backup / standard.relative_to(tmp_path)).exists()
+    assert (legacy.parent / '2026_09_archive.parquet').exists()
+
+
+def test_mismatched_element_in_current_layout_refuses_before_backup(tmp_path):
+    source = tmp_path / "model/ndfd/gust/2026_09_ndfd_wind_archive.parquet"
+    write(source, [10])
+    with pytest.raises(ValueError, match="disagree"):
+        migrate(tmp_path, apply=True)
+    assert source.exists()
+    assert not list(tmp_path.glob("ndfd_migration_backup_*"))
+
+
 def test_mismatched_element_refuses_before_any_changes(tmp_path):
     source = tmp_path / "ndfd/gust/2026_05_ndfd_wind_archive.parquet"
     write(source, [10])

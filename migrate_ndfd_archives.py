@@ -1,4 +1,4 @@
-"""Move legacy local NDFD archives into model/ndfd/<element>/YYYY_MM_archive.parquet.
+"""Move/rename local NDFD archives into model/ndfd/<element>/YYYY_MM_archive.parquet.
 
 Preview by default; --apply backs up originals before changing any archive.
 Existing destinations are merged, removing only exact repeated rows. Records
@@ -30,27 +30,31 @@ def migration_plan(root, region="alaska"):
     groups = defaultdict(list)
     for name in regions:
         regional_root = root / "hawaii" if name == "hawaii" else root
-        source_root = regional_root / "ndfd"
-        if not source_root.exists():
-            continue
-        for source in sorted(source_root.rglob("*_archive.parquet")):
-            if source.is_symlink() or not source.resolve().is_relative_to(root):
-                raise ValueError(f"Refusing linked/outside source: {source}")
-            match = LEGACY_NAME.fullmatch(source.name)
-            if match:
-                year, month, element = match.groups()
-                if source.parent != source_root and source.parent.name.lower() != element.lower():
-                    raise ValueError(f"Filename and element directory disagree: {source}")
-            else:
-                match = MONTH_NAME.fullmatch(source.name)
-                if not match or source.parent == source_root:
-                    raise ValueError(f"Unrecognized NDFD archive name: {source}")
-                year, month = match.groups()
-                element = source.parent.name
-            destination = regional_root / "model" / "ndfd" / element.lower() / f"{year}_{month}_archive.parquet"
-            if not destination.resolve().is_relative_to(root):
-                raise ValueError(f"Destination escapes archive root: {destination}")
-            groups[destination].append(source)
+        # Files may already have been moved under model/ndfd while keeping
+        # their old YYYY_MM_ndfd_<element>_archive.parquet names.
+        for source_root in (regional_root / "ndfd", regional_root / "model" / "ndfd"):
+            if not source_root.exists():
+                continue
+            for source in sorted(source_root.rglob("*_archive.parquet")):
+                if source.is_symlink() or not source.resolve().is_relative_to(root):
+                    raise ValueError(f"Refusing linked/outside source: {source}")
+                match = LEGACY_NAME.fullmatch(source.name)
+                if match:
+                    year, month, element = match.groups()
+                    if source.parent != source_root and source.parent.name.lower() != element.lower():
+                        raise ValueError(f"Filename and element directory disagree: {source}")
+                else:
+                    match = MONTH_NAME.fullmatch(source.name)
+                    if not match or source.parent == source_root:
+                        raise ValueError(f"Unrecognized NDFD archive name: {source}")
+                    year, month = match.groups()
+                    element = source.parent.name
+                destination = regional_root / "model" / "ndfd" / element.lower() / f"{year}_{month}_archive.parquet"
+                if not destination.resolve().is_relative_to(root):
+                    raise ValueError(f"Destination escapes archive root: {destination}")
+                if source == destination:
+                    continue  # Already standardized; never migrate a file onto itself.
+                groups[destination].append(source)
     return dict(sorted(groups.items()))
 
 

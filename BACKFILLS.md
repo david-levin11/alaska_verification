@@ -251,3 +251,28 @@ without validated nominal endpoints should still be rebuilt as described above.
 A retained monthly Parquet alone cannot establish which absent totals were
 available from Synoptic; compare a rebuilt month with independent daily calls
 or the raw API results before declaring complete coverage.
+
+
+## Normalize NDFD filenames already under model/ndfd
+
+`migrate_ndfd_archives.py` now scans both `ndfd/` and `model/ndfd/`, including
+the equivalent directories under `hawaii/`. This covers archives whose folders
+were moved previously but whose names still look like
+`2026_09_ndfd_precip6hr_archive.parquet`. Their destination is
+`model/ndfd/precip6hr/2026_09_archive.parquet`. Already standardized files are
+skipped and never treated as sources for themselves. When a standard-named
+file exists, the migration backs up both it and the legacy files, merges them
+and removes only exact duplicate rows. Differing records remain preserved.
+
+Stop concurrent archive writers, then preview and apply using the archive
+root containing `model/` (not `model/ndfd/` itself):
+
+```shell
+python migrate_ndfd_archives.py --root /path/to/alaska_verification --region all
+python migrate_ndfd_archives.py --root /path/to/alaska_verification --region all --apply
+```
+
+Keep the timestamped backup directory and manifest. The default root is the
+script's directory. Future local `run_ndfd_archiver.py --local` writes already
+use `model/ndfd/<element>/YYYY_MM_archive.parquet`. The S3 writer still uses
+legacy filenames; this local migration does not change remote objects.
