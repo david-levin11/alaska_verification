@@ -201,5 +201,28 @@ IDs with the OBS inventory before starting a historical backfill. Existing
 Parquet archives are unchanged by the code update; rerun affected NDFD months
 to extract forecasts for previously omitted stations. Avoid concurrent writers
 to the same monthly file. This change does not modify the separate
-`ModelArchiver` station-discovery policy for NBM/HRRR/URMA/etc., and does not
-change NDFD decoding concurrency or resolve the MaxT scanner crash.
+`ModelArchiver` station-discovery policy for NBM/HRRR/URMA/etc.
+
+
+## NDFD decoder concurrency
+
+NDFD downloads and point extraction can still use `MAX_WORKERS`, but native
+GRIB reads are serialized by one shared lock. `ndfd_grib.py` opens, fully loads,
+and closes each cfgrib dataset inside that lock. This includes both wind
+components and all scalar elements. Loading eagerly prevents later `.values`
+access from invoking the native decoder concurrently in another worker.
+
+Each read prints `Decoding NDFD GRIB: <source>` with flushing enabled so a
+native termination identifies the source being processed. Python-level read
+or download failures now propagate and prevent the monthly chunk from being
+saved as an incomplete archive. Pending workers are cancelled after a failure;
+previously saved monthly files remain in place. A native fatal scanner error
+cannot be handled by Python exception retries; serialization addresses the
+observed concurrent-decoder failure path.
+
+Validation includes concurrent-download/serialized-decoder regression tests,
+Hawaii wind extraction, failure propagation and decoder cleanup. Real NOAA
+July 1 QPF and MaxT GRIBs were also loaded from four workers and extracted to
+Parquet in the Linux test environment. The original Windows scanner crash
+cannot be reproduced or ruled out for every library build by those tests;
+retry the failing July chunk after deployment and retain its log/exit status.

@@ -287,6 +287,7 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
 
 def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
     from grid_utils import grid_coordinates, outside_hawaii_grid
+    from ndfd_grib import load_ndfd_dataset
     station_index_cache = {}  # This decoded grid only.
     records = []
     try:
@@ -294,12 +295,12 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
         dir_url = f'simplecache::s3://{dir_file}' if dir_file else None
 
         with fsspec.open(speed_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_speed:
-            ds_speed = xr.open_dataset(f_speed.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
+            ds_speed = load_ndfd_dataset(f_speed.name, source=speed_file)
         #print(f"Our dataset is: {ds_speed}")
         ds_dir = None
         if dir_url:
             with fsspec.open(dir_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_dir:
-                ds_dir = xr.open_dataset(f_dir.name, engine='cfgrib', backend_kwargs={'indexpath': ''}, decode_timedelta=True)
+                ds_dir = load_ndfd_dataset(f_dir.name, source=dir_file)
 
         lats = ds_speed.latitude.values
         lons = normalize_lons_to_minus180_180(ds_speed.longitude.values)
@@ -357,6 +358,9 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
 
     except Exception as e:
         print(f"❌ Failed to process {speed_file} + {dir_file}: {e}")
+        # Stop this archive chunk rather than save an incomplete result after
+        # a Python-level decoder/download failure.
+        raise
     return pd.DataFrame.from_records(records)
 
 def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tmp_dir):
@@ -383,7 +387,12 @@ def extract_ndfd_forecasts_parallel(speed_files, direction_files, station_df, tm
     with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
         futures = [executor.submit(process_file_pair, s, d, station_df, tmp_dir, element_keys) for s, d in matched_pairs]
         for i, future in enumerate(as_completed(futures), 1):
-            results.append(future.result())
+            try:
+                results.append(future.result())
+            except Exception:
+                for pending in futures:
+                    pending.cancel()
+                raise
             print(f"✅ Completed {i}/{len(matched_pairs)} file pairs.")
     
     return pd.concat(results, ignore_index=True)

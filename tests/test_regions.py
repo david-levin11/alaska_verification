@@ -83,9 +83,10 @@ def test_obs_state(monkeypatch):
     config.configure_region('hawaii')
     monkeypatch.setattr(config,'ELEMENT','Wind')
     calls=[]
-    def fetch(url,params):
+    def fetch(url,params,timeout):
         calls.append(params)
-        return SimpleNamespace(raise_for_status=lambda:None,json=lambda:{'STATION':[{'STID':'PHNL'}]})
+        return SimpleNamespace(raise_for_status=lambda:None,json=lambda:{
+            'SUMMARY': {'RESPONSE_CODE': 1}, 'STATION':[{'STID':'PHNL'}]})
     monkeypatch.setattr(obs_archiver.requests,'get',fetch)
     assert ObsArchiver(config).get_station_metadata()==['PHNL']
     assert calls[0]['state']=='hi'
@@ -193,6 +194,8 @@ def test_ndfd_flattened_hawaii_grid(monkeypatch):
     monkeypatch.setattr(config,'ELEMENT','Wind')
     class Dataset(dict):
         def __getattr__(self,key): return self[key]
+        def load(self): return self
+        def close(self): pass
     common={k:SimpleNamespace(values=np.array(v)) for k,v in {
         'latitude':[21.3,21.3,21.325,21.325],
         'longitude':[202.075,202.1,202.075,202.1],
