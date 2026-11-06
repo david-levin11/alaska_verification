@@ -39,9 +39,35 @@ Example (all times UTC):
 python run_model_archiver.py --region alaska --model nbm --element maxt --start 202610250000 --end 202610251200 --local
 ```
 
-For these four QMD-sourced elements, use 00/06/12/18 UTC start/end hours, not
+For these QMD-sourced elements, use 00/06/12/18 UTC start/end hours, not
 NBM core's one-hour-offset cycles. Existing NBMQMD archives are not converted
 or moved; the deterministic values must be extracted from their source fields.
+
+### Deterministic NBM MinRH from QMD
+
+Use `--model nbm --element minrh`. This selects exactly the unannotated
+`MINRH:2 m above ground:<start>-<end> hour min fcst:` record from the QMD
+source file, excluding percentile/probability/mean/stddev records. Validate
+GRIB PDT 8, parameter 0/1/198, 2 m above ground, minimum statistic, 12-hour
+duration, explicit endpoint, and percent units. Preserve percent values (no
+temperature or precipitation conversion) in the single `minrh` output column.
+
+The source is NBMQMD, but archive identity is deterministic NBM:
+`model/nbm/minrh/YYYY_MM_archive.parquet`, or under `hawaii/` for Hawaii.
+This does not add a probabilistic NBMQMD MinRH element. The daily wrapper
+includes NBM `minrh` using the 00Z date window and the 00/12Z QMD source cycles.
+The checked 00Z feed contains leads 30,54,78,102,126,150,174; the 12Z feed
+contains 18,42,66,90,114,138,162. Each is a 12-hour minimum ending at 06Z;
+URL generation filters the lead schedule to the appropriate source cycle.
+
+```powershell
+python -u run_model_archiver.py --region alaska --model nbm --element minrh `
+  --start "2026-11-05 00:00" --end "2026-11-05 12:00" --local
+```
+
+These dates select initialization cycles, not observation/forecast valid dates.
+The existing model station inventory is used. OBS MinRH aggregation and
+verification-app support are separate work.
 
 ## NDFD minimum relative humidity
 

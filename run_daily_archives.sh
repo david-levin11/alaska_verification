@@ -59,7 +59,7 @@ case "$SOURCE_STORAGE" in
 esac
 
 declare -A AVAILABLE_FIELDS=(
-  [nbm]="Wind snow6hr snow24hr snow48hr snow72hr precip6hr precip24hr maxt mint"
+  [nbm]="Wind snow6hr snow24hr snow48hr snow72hr precip6hr precip24hr maxt mint minrh"
   [nbmqmd]="precip24hr precip6hr maxt mint Wind Gust rh"
   [hrrr]="Wind rh precip6hr snow6hr temp2m"
   [rrfs]="Wind rh precip6hr snow6hr temp2m"
@@ -171,7 +171,7 @@ for model in "${MODEL_LIST[@]}"; do
       START="${GLOBAL_START}"
       END="${GLOBAL_END}"
     else
-      if [[ "$model" == "nbm_exp" || ( "$model" == "nbm" && ! "$element" =~ ^(precip6hr|precip24hr|maxt|mint)$ ) ]]; then
+      if [[ "$model" == "nbm_exp" || ( "$model" == "nbm" && ! "$element" =~ ^(precip6hr|precip24hr|maxt|mint|minrh)$ ) ]]; then
         START="$(date -u -d "${BASE_DATE} 01:00" +%Y%m%d%H)00"
         END="$(date -u -d "${BASE_DATE} +1 day 01:00" +%Y%m%d%H)00"
       else

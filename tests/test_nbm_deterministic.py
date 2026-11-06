@@ -6,6 +6,7 @@ import ast
 import os
 import shutil
 import tempfile
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,7 @@ def restore_config():
     ('precip24hr', 'APCP', 'surface', '12-36 hour acc fcst'),
     ('maxt', 'TMP', '2 m above ground', '18-36 hour max fcst'),
     ('mint', 'TMP', '2 m above ground', '18-36 hour min fcst'),
+    ('minrh', 'MINRH', '2 m above ground', '24-36 hour min fcst'),
 ])
 def test_index_selects_only_exact_deterministic_interval(element, variable, level, period):
     records = [
@@ -37,7 +39,7 @@ def test_index_selects_only_exact_deterministic_interval(element, variable, leve
         f'{variable}:{level}:{period}:prob >2.54:prob fcst 255/255',
         f'{variable}:{level}:{period}:ens mean',
         f'{variable}:{level}:{period}:ens std dev',
-        f'{variable}:{level}:24-36 hour acc fcst:',
+        f'{variable}:{level}:0-36 hour acc fcst:',
         f'{variable}:{level}:{period}:',
         f'{variable}:{level}:{period}:50% level',
     ]
@@ -56,21 +58,71 @@ def test_day_labels_and_missing_or_ambiguous_fields():
         deterministic_ranges(lines + ['3:200:d=2026102500:APCP:surface:0-24 hour acc fcst:'], 'precip24hr', 24)
 
 
+def test_minrh_uploaded_index_record_byte_bounds():
+    # Adjacent records from the user's blend.t00z.qmd.f030.ak.grib2 index.
+    lines = [
+        '77:84517933:d=2026110600:DPT:2 m above ground:30 hour fcst:ens std dev',
+        '78:86368820:d=2026110600:MINRH:2 m above ground:18-30 hour min fcst:',
+        '79:87197435:d=2026110600:APCP:surface:24-30 hour acc fcst:prob >0.254:prob fcst 255/255',
+    ]
+    assert list(deterministic_ranges(lines,'minrh',30)) == ['86368820-87197434']
+
+
+@pytest.mark.parametrize('key,value', [('parameterNumber',1),('parameterCategory',0),
+    ('stepType','max'),('units','K'),('units','1'),('level',10)])
+def test_minrh_rejects_wrong_quantity_units_or_level(key,value):
+    g=Message('minrh',30)
+    g[key]=value
+    with pytest.raises(ValueError): decode_field(g,'minrh',30)
+
+
+@pytest.mark.parametrize('region', ['alaska','hawaii'])
+def test_minrh_qmd_cycles_select_only_daily_06z_windows(region,tmp_path,monkeypatch):
+    config.configure_region(region)
+    config.MODEL='nbm'
+    monkeypatch.setattr(ModelArchiver,'ensure_model_metadata',lambda self:pd.DataFrame({'stid':['TEST']}))
+    monkeypatch.setattr(config,'OBS',str(tmp_path))
+    monkeypatch.setattr(utils.requests,'head',lambda *a,**k:SimpleNamespace(ok=True))
+    archiver=ModelArchiver(config,wxelement='minrh')
+    urls=archiver.fetch_file_list(pd.Timestamp('2026-11-06'),pd.Timestamp('2026-11-06 12:00'))
+    assert len(urls)==14
+    for cycle,expected in [('00',list(range(30,175,24))),('12',list(range(18,163,24)))]:
+        subset=[u for u in urls if f'/{cycle}/qmd/' in u]
+        assert [utils.parse_forecast_hour(u) for u in subset]==expected
+        assert all(u.endswith(f'.{config.HERBIE_DOMAIN}.grib2') for u in subset)
+
+
+@pytest.mark.parametrize('region', ['alaska','hawaii'])
+def test_daily_minrh_uses_qmd_midnight_window(region,tmp_path):
+    env={**os.environ,'DRY_RUN':'1','MODELS':'nbm','RUN_REFS':'0',
+         'RUN_NDFD':'0','RUN_OBS':'0','LOG_DIR':str(tmp_path)}
+    script=Path(__file__).parents[1]/'run_daily_archives.sh'
+    result=subprocess.run(['bash',str(script),'--region',region,'2026-11-06'],
+        env=env,capture_output=True,text=True)
+    assert result.returncode==0,result.stdout+result.stderr
+    line=next(line for line in result.stdout.splitlines() if 'DRY_RUN:' in line and '--element minrh ' in line)
+    assert '--model nbm' in line
+    assert '--start 202611060000 --end 202611070000' in line
+
+
 class Message(dict):
     def __init__(self, element, lead):
         precip = element.startswith('precip')
+        humidity = element == 'minrh'
         reference = datetime(2026, 10, 25)
         endpoint = reference + timedelta(hours=lead)
         super().__init__(dataDate=20261025, dataTime=0, productDefinitionTemplateNumber=8,
-            stepType={'maxt':'max','mint':'min'}.get(element,'accum'), stepUnits=1,
+            stepType={'maxt':'max','mint':'min','minrh':'min'}.get(element,'accum'), stepUnits=1,
             startStep=lead-INTERVALS[element], endStep=lead,
-            discipline=0, parameterCategory=1 if precip else 0,
-            parameterNumber=8 if precip else 0, typeOfLevel='surface' if precip else 'heightAboveGround',
-            level=0 if precip else 2, units='kg m**-2' if precip else 'K')
+            discipline=0, parameterCategory=1 if (precip or humidity) else 0,
+            parameterNumber=198 if humidity else (8 if precip else 0), typeOfLevel='surface' if precip else 'heightAboveGround',
+            level=0 if precip else 2, units='%' if humidity else ('kg m**-2' if precip else 'K'))
         for name, value in zip(('year','month','day','hour','minute','second'),
                                (endpoint.year,endpoint.month,endpoint.day,endpoint.hour,0,0)):
             self[name+'OfEndOfOverallTimeInterval'] = value
         self.values = np.ma.array([[25.4, 50.8], [0, 100]], mask=[[False, True], [False, False]]) if precip else np.array([[273.15,283.15],[263.15,293.15]])
+        if humidity:
+            self.values = np.ma.array([[42.25, 55.5], [0., 100.]], mask=[[False, True], [False, False]])
         # An intentionally misleading validDate must never shift initialization.
         self.validDate = reference + timedelta(hours=lead-INTERVALS[element])
 
@@ -84,8 +136,8 @@ def test_decoder_uses_grib_reference_and_endpoint_and_correct_units(element):
     reference, endpoint, values = decode_field(g, element, 36)
     assert reference == datetime(2026,10,25)
     assert endpoint == datetime(2026,10,26,12)
-    assert values[0,0] == (1 if element.startswith('precip') else 32)
-    if element.startswith('precip'):
+    assert values[0,0] == (42.25 if element == 'minrh' else (1 if element.startswith('precip') else 32))
+    if element.startswith('precip') or element == 'minrh':
         assert np.isnan(values[0,1])
     else:
         assert values[1,0] == 14
@@ -116,7 +168,11 @@ def test_source_routing_schedules_and_classification(region, tmp_path, monkeypat
         assert config.HERBIE_FORECASTS['nbm'][element] == config.HERBIE_FORECASTS['nbmqmd'][element]
         assert element in config.AVAILABLE_FIELDS['nbm']
         assert element not in config.PROBABILISTIC_ELEMENTS['nbm']
-        assert element in config.PROBABILISTIC_ELEMENTS['nbmqmd']
+        if element == 'minrh':
+            assert element not in config.AVAILABLE_FIELDS['nbmqmd']
+            assert element not in config.PROBABILISTIC_ELEMENTS['nbmqmd']
+        else:
+            assert element in config.PROBABILISTIC_ELEMENTS['nbmqmd']
         assert source_model('nbm', element) == 'nbmqmd'
     assert source_model('nbm', 'Wind') == 'nbm'
     assert config.HERBIE_FORECASTS['nbm']['Wind'][0] == 2
@@ -158,7 +214,7 @@ def test_real_extractor_outputs_deterministic_columns(element, locked_download, 
         pd.DataFrame({'stid':['NKXA2'],'latitude':[58.0],'longitude':[-135.0]}),
         config.HERBIE_XARRAY_STRINGS[element]['nbm'], element,'nbm',config)
     assert result.columns.tolist()==['station_id','init_time','valid_time','forecast_hour',element]
-    assert result[element].tolist()==[1 if element.startswith('precip') else 32]
+    assert result[element].tolist()==[42.25 if element == 'minrh' else (1 if element.startswith('precip') else 32)]
     assert result.init_time.iloc[0]==pd.Timestamp('2026-10-25')
     assert result.valid_time.iloc[0]==pd.Timestamp('2026-10-26 12:00')
     if locked_download:

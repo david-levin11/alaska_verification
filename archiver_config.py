@@ -651,6 +651,14 @@ S3_URLS["rrfsens"] = "s3://alaska-verification/rrfsens/"
 
 # These deterministic fields come from QMD, but retain NBM archive identity.
 from nbm_deterministic import ELEMENTS as NBM_DETERMINISTIC_QMD_ELEMENTS
+# QMD source lookup only: MinRH is not exposed as a percentile NBMQMD element.
+# Filter this union to the source cycle's 06Z endpoints when building URLs.
+HERBIE_FORECASTS['nbmqmd']['minrh'] = list(range(18, 175, 12))
+HERBIE_XARRAY_STRINGS['minrh'] = {'nbmqmd': [':MINRH:2 m above ground:']}
+HERBIE_REQUIRED_PHRASES['minrh'] = {'nbmqmd': [':MINRH:2 m above ground:']}
+HERBIE_EXCLUDE_PHRASES['minrh'] = {}
+HERBIE_RENAME_MAP['minrh'] = {}
+HERBIE_UNIT_CONVERSIONS['minrh'] = {}
 for _element in NBM_DETERMINISTIC_QMD_ELEMENTS:
     if _element not in AVAILABLE_FIELDS['nbm']:
         AVAILABLE_FIELDS['nbm'].append(_element)
@@ -660,7 +668,8 @@ for _element in NBM_DETERMINISTIC_QMD_ELEMENTS:
     HERBIE_XARRAY_STRINGS[_element]['nbm'] = list(HERBIE_XARRAY_STRINGS[_element]['nbmqmd'])
     HERBIE_REQUIRED_PHRASES[_element]['nbm'] = list(HERBIE_XARRAY_STRINGS[_element]['nbmqmd'])
     HERBIE_EXCLUDE_PHRASES[_element]['nbm'] = ['% level', 'prob', 'ens mean', 'ens std dev']
-    HERBIE_RENAME_MAP[_element]['nbm'] = {'tp' if _element.startswith('precip') else 't2m': _element}
+    _source_var = 'minrh' if _element == 'minrh' else ('tp' if _element.startswith('precip') else 't2m')
+    HERBIE_RENAME_MAP[_element]['nbm'] = {_source_var: _element}
     HERBIE_UNIT_CONVERSIONS[_element]['nbm'] = {}
 
 # Region selection is explicit at entry points; importing config defaults to Alaska.

@@ -604,6 +604,10 @@ def get_model_file_list(start, end, fcst_hours, cycle, base_url, element, model=
                     print(f"⚠️ Error accessing {idx_url}: {e}")
         else:
             for fh in fcst_hours:
+                # Deterministic QMD MinRH is a daily 12-hour minimum ending
+                # at 06Z. Its leads differ between 00Z and 12Z source cycles.
+                if model == 'nbmqmd' and element == 'minrh' and (init.hour + fh) % 24 != 6:
+                    continue
                 if model == 'nbm':
                     fxx = f"f{fh:03d}"
                     relative_path = f"{designator}.{init_date}/{init_hour}/{suite}/{designator}.t{init_hour}z.{suite}.{fxx}.{domain}.grib2"
