@@ -43,6 +43,40 @@ For these four QMD-sourced elements, use 00/06/12/18 UTC start/end hours, not
 NBM core's one-hour-offset cycles. Existing NBMQMD archives are not converted
 or moved; the deterministic values must be extracted from their source fields.
 
+## NDFD minimum relative humidity
+
+`run_ndfd_archiver.py --element minrh` archives the MinRH product separately
+from instantaneous `rh`. Alaska sources are
+`s3://noaa-ndfd-pds/wmo/minrh/YYYY/MM/DD/ZRRZ98_*` and `ZRRZ97_*`;
+Hawaii uses `ZRSZ98_*` and `ZRSZ97_*`. As with other NDFD elements,
+discovery selects the 11Z and 23Z issuance hours and includes a three-day lookback.
+The daily wrapper includes `minrh` by default in both regions. An explicitly
+configured `NDFD_ELEMENTS` override must include it to enable it.
+
+```powershell
+python -u run_ndfd_archiver.py --region alaska --element minrh `
+  --start "2026-11-04 00:00" --end "2026-11-04 23:59" --local
+```
+
+Local output: `model/ndfd/minrh/YYYY_MM_archive.parquet` (under `hawaii/`
+for Hawaii). Columns include `station_id`, `valid_time`, `forecast_hour`,
+`minrh` (percent), `init_time`, `window_start`, `window_end`, and `window_hours`.
+`forecast_hour` is the lead to the interval **end**, and `valid_time` equals
+`window_end`. Window bounds come from each source GRIB message; they are not
+assumed from filenames or a fixed daily schedule. Native percent values use
+the existing one-decimal RH rounding, without clipping or conversion.
+
+Real Alaska files from November 4, 2026, 11Z contain two short-range and five
+extended-range 12-hour minima covering 18Z–06Z. This is a checked example,
+not a hardcoded constraint on other issuances. Some ecCodes versions label
+the variable and units `unknown`; the reader verifies GRIB parameter
+0/1/198 (NOAA MinRH, percent), statistical processing=minimum, and consistent
+reference/interval/endpoint metadata before extracting the single field.
+The shared native decoder lock also protects these metadata reads.
+
+This adds forecast archiving only; observation MinRH aggregation and
+verification-app support are separate changes.
+
 ## Standardized local NDFD layout
 
 New local NDFD writes use `model/ndfd/<element>/YYYY_MM_archive.parquet`, or

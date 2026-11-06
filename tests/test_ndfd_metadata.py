@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).parents[1]
-ELEMENTS = ['Wind', 'Gust', 'rh', 'precip6hr', 'maxt', 'mint', 'snow6hr']
+ELEMENTS = ['Wind', 'Gust', 'rh', 'minrh', 'precip6hr', 'maxt', 'mint', 'snow6hr']
 
 
 def metadata_class(get, extract=None):

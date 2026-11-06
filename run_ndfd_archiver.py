@@ -18,6 +18,8 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
     # Normalize element (e.g., wind → Wind)
     if element.lower() == "wind" or element.lower() == "gust":
         element = element.capitalize()  # "wind" → "Wind", etc.
+    elif element.lower() == "minrh":
+        element = "minrh"
 
     if element not in config.NDFD_FILE_STRINGS:
         print(f"❌ Element '{element}' not recognized. Valid options: {list(config.NDFD_FILE_STRINGS.keys())}")

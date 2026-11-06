@@ -68,7 +68,7 @@ declare -A AVAILABLE_FIELDS=(
 )
 
 # NDFD elements (keys of your NDFD_DICT)
-DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "precip6hr" "maxt" "mint" "snow6hr")
+DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "minrh" "precip6hr" "maxt" "mint" "snow6hr")
 
 # OBS elements
 DEFAULT_OBS_ELEMENTS=("Wind" "rh" "precip24hr" "precip6hr" "maxt" "mint")
@@ -84,7 +84,7 @@ if [[ "$REGION" == "hawaii" ]]; then
     done
     AVAILABLE_FIELDS[$model]="${filtered[*]}"
   done
-  DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "precip6hr" "maxt" "mint")
+  DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "minrh" "precip6hr" "maxt" "mint")
   DEFAULT_REFS_ELEMENTS="Wind rh precip6hr temp2m"
   for element in ${REFS_ELEMENTS:-$DEFAULT_REFS_ELEMENTS} ${NDFD_ELEMENTS:-${DEFAULT_NDFD_ELEMENTS[*]}} ${OBS_ELEMENTS:-${DEFAULT_OBS_ELEMENTS[*]}}; do
     [[ "$element" != snow* ]] || { echo "Snow archiving is disabled for Hawaii" >&2; exit 2; }

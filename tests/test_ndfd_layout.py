@@ -142,23 +142,24 @@ def test_failed_staging_keeps_sources_and_destination(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("region", ["alaska", "hawaii"])
 @pytest.mark.parametrize("local", [True, False])
-def test_production_writer_routing(tmp_path, region, local):
+@pytest.mark.parametrize("element", ["wind", "minrh"])
+def test_production_writer_routing(tmp_path, region, local, element):
     path = Path(__file__).parents[1] / "run_ndfd_archiver.py"
     tree = ast.parse(path.read_text())
     method = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_monthly_archiving")
     model_root = tmp_path / ("hawaii/model" if region == "hawaii" else "model")
     cfg = SimpleNamespace(configure_region=lambda r: None, TMP=str(tmp_path / "tmp"),
                           MODEL_DIR=str(model_root), NDFD_DIR="legacy-should-not-be-used",
-                          NDFD_FILE_STRINGS={"Wind": ["wspd", "wdir"]},
+                          NDFD_FILE_STRINGS={"Wind": ["wspd", "wdir"], "minrh": ["minrh"]},
                           S3_URLS={"ndfd": "s3://example/ndfd/"})
     calls = []
-    fake = SimpleNamespace(fetch_file_list=lambda *a: {"wspd": ["source"]},
+    fake = SimpleNamespace(fetch_file_list=lambda *a: {"wspd": ["source"], "minrh": ["source"]},
         process_files=lambda files: frame([10]),
         write_local_output=lambda data, p: calls.append(p),
         write_to_s3=lambda data, p: calls.append(p))
     ns = dict(config=cfg, tempfile=SimpleNamespace(), pd=pd, relativedelta=relativedelta,
               shutil=shutil, os=os, NDFDArchiver=lambda *a, **k: fake)
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(path), "exec"), ns)
-    ns[method.name](pd.Timestamp("2026-05-01"), pd.Timestamp("2026-05-31"), "wind", local, region)
-    expected = str(model_root / "ndfd/wind/2026_05_archive.parquet") if local else "s3://example/ndfd/2026_05_ndfd_wind_archive.parquet"
+    ns[method.name](pd.Timestamp("2026-05-01"), pd.Timestamp("2026-05-31"), element, local, region)
+    expected = str(model_root / f"ndfd/{element}/2026_05_archive.parquet") if local else f"s3://example/ndfd/2026_05_ndfd_{element}_archive.parquet"
     assert calls == [expected]

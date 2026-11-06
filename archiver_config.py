@@ -548,6 +548,9 @@ NDFD_DICT = {"Wind":
                  },
             "rh": 
                 {"rh": ["YRRZ98", "YRRZ97"]
+                 },
+            "minrh":
+                {"minrh": ["ZRRZ98", "ZRRZ97"]
                  }
             }
 
@@ -567,7 +570,8 @@ NDFD_FILE_STRINGS = {"Wind":["wspd", "wdir"],
                     "maxt": ["maxt"],
                     "mint": ["mint"],
                     "snow6hr": ["snow"],
-                    "rh": ["rh"]
+                    "rh": ["rh"],
+                    "minrh": ["minrh"]
                     }
 
 NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"],
@@ -576,7 +580,10 @@ NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"],
                         "maxt": ["tmax"],
                         "mint": ["tmin"],
                         "snow6hr": ["unknown"],
-                        "rh": ["r2"]
+                        "rh": ["r2"],
+                        # Some ecCodes tables call parameter 0/1/198 unknown.
+                        # The extractor validates the actual GRIB messages.
+                        "minrh": ["unknown"]
                     }
 
 ##################### AWS Params #################################

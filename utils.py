@@ -261,6 +261,9 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
     elif element_type == "rh":
         filtered_files = {"rh": []}
         components = ["rh"]
+    elif element_type == "minrh":
+        filtered_files = {"minrh": []}
+        components = ["minrh"]
 
     for component in components:
         prefixes = element_dict[element_type][component]
@@ -287,7 +290,7 @@ def get_ndfd_file_list(start, end, element_dict, element_type):
 
 def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
     from grid_utils import grid_coordinates, outside_hawaii_grid
-    from ndfd_grib import load_ndfd_dataset
+    from ndfd_grib import load_ndfd_dataset, read_ndfd_minrh_windows
     station_index_cache = {}  # This decoded grid only.
     records = []
     try:
@@ -296,6 +299,7 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
 
         with fsspec.open(speed_url, s3={"anon": True}, filecache={"cache_storage": tmp_dir}) as f_speed:
             ds_speed = load_ndfd_dataset(f_speed.name, source=speed_file)
+            minrh_windows = read_ndfd_minrh_windows(f_speed.name) if config.ELEMENT == 'minrh' else None
         #print(f"Our dataset is: {ds_speed}")
         ds_dir = None
         if dir_url:
@@ -305,10 +309,25 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
         lats = ds_speed.latitude.values
         lons = normalize_lons_to_minus180_180(ds_speed.longitude.values)
         lats, lons, grid_id = grid_coordinates(lats, lons)
-        steps = pd.to_timedelta(ds_speed.step.values)
-        valid_times = pd.to_datetime(ds_speed.valid_time.values)
+        steps = pd.to_timedelta(np.atleast_1d(ds_speed.step.values))
+        valid_times = pd.to_datetime(np.atleast_1d(ds_speed.valid_time.values))
 
         spd_key = element_keys[0]
+        if minrh_windows is not None:
+            # The original messages have already been checked as MinRH.
+            # Avoid depending on a version-specific ecCodes shortName.
+            fields = list(ds_speed.data_vars)
+            if len(fields) != 1:
+                raise ValueError(f'Expected one MinRH variable, found {fields}')
+            spd_key = fields[0]
+            reference = pd.Timestamp(ds_speed.time.values)
+            windows_by_end = {w['window_end']: w for w in minrh_windows}
+            if len(windows_by_end) != len(minrh_windows) or set(valid_times) != set(windows_by_end):
+                raise ValueError('Decoded MinRH endpoints disagree with GRIB messages')
+            for step, endpoint in zip(steps, valid_times):
+                window = windows_by_end[endpoint]
+                if window['init_time'] != reference or endpoint-reference != step:
+                    raise ValueError('Decoded MinRH reference/lead disagrees with GRIB messages')
         speed_array = ds_speed[spd_key].values.reshape((-1,) + lats.shape)
         dir_array = ds_dir[element_keys[1]].values.reshape((-1,) + lats.shape) if ds_dir and len(element_keys) > 1 else None
 
@@ -351,6 +370,9 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                     record["snow6hr"] = round(float(M_to_IN(spd)), 1)
                 elif config.ELEMENT == "rh":
                     record["rh"] = round(float(spd), 1)
+                elif config.ELEMENT == "minrh":
+                    record['minrh'] = round(float(spd), 1)
+                    record.update(windows_by_end[valid_time])
                 else:
                     record[spd_key] = float(spd)
 
