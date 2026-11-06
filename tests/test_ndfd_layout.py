@@ -155,8 +155,8 @@ def test_production_writer_routing(tmp_path, region, local, element):
     calls = []
     fake = SimpleNamespace(fetch_file_list=lambda *a: {"wspd": ["source"], "minrh": ["source"]},
         process_files=lambda files: frame([10]),
-        write_local_output=lambda data, p: calls.append(p),
-        write_to_s3=lambda data, p: calls.append(p))
+        write_local_output=lambda data, p, **kwargs: calls.append(p),
+        write_to_s3=lambda data, p, **kwargs: calls.append(p))
     ns = dict(config=cfg, tempfile=SimpleNamespace(), pd=pd, relativedelta=relativedelta,
               shutil=shutil, os=os, NDFDArchiver=lambda *a, **k: fake)
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(path), "exec"), ns)

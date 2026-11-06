@@ -321,13 +321,20 @@ def process_file_pair(speed_file, dir_file, station_df, tmp_dir, element_keys):
                 raise ValueError(f'Expected one MinRH variable, found {fields}')
             spd_key = fields[0]
             reference = pd.Timestamp(ds_speed.time.values)
-            windows_by_end = {w['window_end']: w for w in minrh_windows}
-            if len(windows_by_end) != len(minrh_windows) or set(valid_times) != set(windows_by_end):
-                raise ValueError('Decoded MinRH endpoints disagree with GRIB messages')
-            for step, endpoint in zip(steps, valid_times):
-                window = windows_by_end[endpoint]
-                if window['init_time'] != reference or endpoint-reference != step:
-                    raise ValueError('Decoded MinRH reference/lead disagrees with GRIB messages')
+            # Match arrays by the decoder's encoded step, not its derived
+            # valid_time: a clipped first interval can have the wrong derived
+            # endpoint. Never assume GRIB message order equals sorted step order.
+            windows_by_step = {pd.Timedelta(hours=w['encoded_forecast_hour']): w for w in minrh_windows}
+            if len(windows_by_step) != len(minrh_windows) or set(steps) != set(windows_by_step):
+                raise ValueError('Decoded MinRH steps disagree with GRIB messages')
+            ordered_windows = [windows_by_step[step] for step in steps]
+            if any(w['init_time'] != reference for w in ordered_windows):
+                raise ValueError('Decoded MinRH reference disagrees with GRIB messages')
+            valid_times = pd.DatetimeIndex([w['window_end'] for w in ordered_windows])
+            steps = valid_times-reference
+            windows_by_end = {w['window_end']: w for w in ordered_windows}
+            if len(windows_by_end) != len(ordered_windows):
+                raise ValueError('Duplicate explicit MinRH endpoints')
         speed_array = ds_speed[spd_key].values.reshape((-1,) + lats.shape)
         dir_array = ds_dir[element_keys[1]].values.reshape((-1,) + lats.shape) if ds_dir and len(element_keys) > 1 else None
 

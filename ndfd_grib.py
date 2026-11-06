@@ -34,7 +34,7 @@ def read_ndfd_minrh_windows(path):
     import math
     import pandas as pd
     import pygrib
-    from grib_timestamps import percentile_times
+    from datetime import datetime
     windows = []
     with _DECODE_LOCK:
         with pygrib.open(str(path)) as messages:
@@ -54,10 +54,30 @@ def read_ndfd_minrh_windows(path):
                     raise ValueError('Invalid or inconsistent MinRH statistical interval')
                 if not end.is_integer():
                     raise ValueError('MinRH forecast endpoint must be a whole hour')
-                reference, endpoint = percentile_times(message, int(end))
-                windows.append(dict(init_time=pd.Timestamp(reference),
-                    window_start=pd.Timestamp(reference)+pd.Timedelta(hours=start),
-                    window_end=pd.Timestamp(endpoint), window_hours=duration))
+                reference = pd.Timestamp(datetime.strptime(
+                    f"{int(message['dataDate']):08d}{int(message['dataTime']):04d}", '%Y%m%d%H%M'))
+                endpoint = pd.Timestamp(datetime(*(int(message[prefix+'OfEndOfOverallTimeInterval'])
+                    for prefix in ('year', 'month', 'day', 'hour', 'minute', 'second'))))
+                window_start = reference + pd.Timedelta(hours=start)
+                actual_hours = (endpoint-window_start).total_seconds()/3600
+                lead = (endpoint-reference).total_seconds()/3600
+                mismatch = abs(actual_hours-duration) > 1e-8
+                # Some 00Z first periods encode start=0 and duration=12 while
+                # their explicit endpoint is 06Z. Preserve those inconsistent
+                # source fields rather than move the endpoint to 12Z or infer
+                # a pre-initialization start. Only allow a shortened first
+                # interval; arbitrary later mismatches still fail validation.
+                if (not lead.is_integer() or actual_hours <= 0 or
+                        (mismatch and not (start == 0 and actual_hours < duration))):
+                    raise ValueError('Invalid or inconsistent MinRH explicit endpoint')
+                if mismatch:
+                    print(f'WARNING: MinRH interval starts {window_start} and ends {endpoint} '
+                          f'({actual_hours:g}h), but source declares {duration:g}h; '
+                          'preserving bounds and flagging window_duration_mismatch.', flush=True)
+                windows.append(dict(init_time=reference, window_start=window_start,
+                    window_end=endpoint, window_hours=actual_hours,
+                    source_window_hours=duration, window_duration_mismatch=mismatch,
+                    encoded_forecast_hour=int(end)))
     if not windows:
         raise ValueError('No MinRH GRIB messages found')
     return windows

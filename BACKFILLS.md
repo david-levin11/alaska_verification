@@ -74,6 +74,21 @@ the variable and units `unknown`; the reader verifies GRIB parameter
 reference/interval/endpoint metadata before extracting the single field.
 The shared native decoder lock also protects these metadata reads.
 
+Some 00Z first periods have inconsistent source metadata: for example,
+`ZRRZ98_KWBN_202605122346` encodes a May 13 00Z reference and period start,
+a 12-hour duration, but an explicit end of May 13 06Z. ecCodes/cfgrib derives
+an incorrect 12Z endpoint from that duration. MinRH now matches array slices
+by their encoded steps, then assigns the explicit GRIB endpoint. This example
+is archived with `forecast_hour=6`, start=00Z, end=06Z, `window_hours=6`,
+`source_window_hours=12`, `encoded_forecast_hour=12`, and
+`window_duration_mismatch=True`. No pre-reference start or complete 12-hour
+coverage is inferred. The flag retains the ambiguity in the original interval
+metadata; consumers needing full comparable periods should exclude flagged
+rows. Normal periods have matching durations and a false flag. Invalid later
+intervals, duplicate endpoints, and mismatched array steps still fail.
+Repeat MinRH writes deduplicate by station/initialization/valid time so added
+metadata does not duplicate previously archived forecasts.
+
 This adds forecast archiving only; observation MinRH aggregation and
 verification-app support are separate changes.
 

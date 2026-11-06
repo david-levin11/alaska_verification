@@ -53,16 +53,20 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
             df = archiver.process_files(filtered_files)
             #print(f'Dataframe is: {df[df['station_id']=='PAJN'].head(10)}')
             filename = f"{current.year}_{current.month:02d}_ndfd_{element.lower()}_archive.parquet"
+            # Metadata columns can evolve without duplicating the same MinRH
+            # station/run/endpoint when an existing month is backfilled again.
+            write_options = ({'dedup_columns': ['station_id', 'init_time', 'valid_time']}
+                             if element == 'minrh' else {})
 
             if config.USE_CLOUD_STORAGE:
                 s3_url = f"{config.S3_URLS['ndfd']}{filename}"
-                archiver.write_to_s3(df, s3_url)
+                archiver.write_to_s3(df, s3_url, **write_options)
             else:
                 local_path = os.path.join(
                     config.MODEL_DIR, "ndfd", element.lower(),
                     f"{current.year}_{current.month:02d}_archive.parquet",
                 )
-                archiver.write_local_output(df, local_path)
+                archiver.write_local_output(df, local_path, **write_options)
 
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)

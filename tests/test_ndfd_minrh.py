@@ -58,7 +58,53 @@ def test_actual_message_window(monkeypatch):
     window=read_ndfd_minrh_windows('sample')[0]
     assert window == dict(init_time=pd.Timestamp('2026-11-04 12:00'),
         window_start=pd.Timestamp('2026-11-04 18:00'),
-        window_end=pd.Timestamp('2026-11-05 06:00'),window_hours=12.)
+        window_end=pd.Timestamp('2026-11-05 06:00'),window_hours=12.,
+        source_window_hours=12.,window_duration_mismatch=False,encoded_forecast_hour=18)
+
+
+def clipped_message():
+    # Exact timing metadata from ZRRZ98_KWBN_202605122346, first message.
+    return message(dataDate=20260513, dataTime=0, startStep=0, endStep=12,
+        monthOfEndOfOverallTimeInterval=5, dayOfEndOfOverallTimeInterval=13)
+
+
+def test_clipped_first_window_keeps_encoded_start_and_explicit_end(monkeypatch):
+    mock_grib(monkeypatch,[clipped_message()])
+    window=read_ndfd_minrh_windows('sample')[0]
+    assert window['init_time']==window['window_start']==pd.Timestamp('2026-05-13')
+    assert window['window_end']==pd.Timestamp('2026-05-13 06:00')
+    assert window['window_hours']==6
+    assert window['source_window_hours']==12
+    assert window['window_duration_mismatch'] is True
+    assert window['encoded_forecast_hour']==12
+
+
+def test_clipped_first_window_maps_values_by_step_not_grib_order(monkeypatch,tmp_path):
+    monkeypatch.setattr(config,'ELEMENT','minrh')
+    later=message(dataDate=20260513,dataTime=0,startStep=18,endStep=30,
+        monthOfEndOfOverallTimeInterval=5,dayOfEndOfOverallTimeInterval=14)
+    mock_grib(monkeypatch,[later,clipped_message()])
+    ds=xr.Dataset({'unknown':(('step','y','x'),np.array([[[42.25]],[[63.]]]))},coords={
+        'latitude':(('y','x'),[[58.]]),'longitude':(('y','x'),[[-135.]]),
+        'step':np.array([12,30],dtype='timedelta64[h]'),
+        'time':np.datetime64('2026-05-13T00:00'),
+        # cfgrib calculates a wrong 12Z valid_time for the first array slice.
+        'valid_time':('step',np.array(['2026-05-13T12:00','2026-05-14T06:00'],dtype='datetime64[ns]'))})
+    @contextmanager
+    def opened(*a,**k):yield SimpleNamespace(name='sample')
+    monkeypatch.setattr(utils.fsspec,'open',opened)
+    import ndfd_grib
+    monkeypatch.setattr(ndfd_grib,'load_ndfd_dataset',lambda *a,**k:ds)
+    station=pd.DataFrame([dict(stid='TEST',latitude=58.,longitude=-135.)])
+    result=utils.process_file_pair('sample',None,station,str(tmp_path),['unknown'])
+    assert result.forecast_hour.tolist()==[6,30]
+    assert result.minrh.tolist()==[42.2,63.]
+    assert result.window_hours.tolist()==[6.,12.]
+    assert result.window_duration_mismatch.tolist()==[True,False]
+    assert result.valid_time.tolist()==[pd.Timestamp('2026-05-13 06:00'),pd.Timestamp('2026-05-14 06:00')]
+    path=tmp_path/'clipped.parquet'
+    result.to_parquet(path,index=False)
+    pd.testing.assert_frame_equal(result,pd.read_parquet(path))
 
 
 @pytest.mark.parametrize('override', [dict(parameterNumber=1),
