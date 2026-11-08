@@ -66,8 +66,47 @@ python -u run_model_archiver.py --region alaska --model nbm --element minrh `
 ```
 
 These dates select initialization cycles, not observation/forecast valid dates.
-The existing model station inventory is used. OBS MinRH aggregation and
-verification-app support are separate work.
+The existing model station inventory is used. Observed MinRH is described
+below; verification-app support remains separate work.
+
+## Observed minimum relative humidity
+
+`run_obs_archiver.py --element minrh` requests Synoptic relative-humidity
+time series and computes the minimum of valid reports in each daily
+**[18Z previous day, 06Z endpoint day)** window. Requested start/end times
+select 06Z endpoints inclusively; `date` is the endpoint's UTC calendar day,
+and `valid_time` equals `window_end`. A May 1 endpoint requests April 30 18Z
+warm-up data; monthly files are partitioned by endpoint month. Missing data
+in one period cannot shift or discard later periods.
+
+Output: `model/obs/minrh/YYYY_MM_archive.parquet`, or under `hawaii/` for
+Hawaii. Values are percentages in `minrh`, with `rh_units='%'`. Each row also
+contains `window_start`, `window_end`, `n_obs`, `first_report`, `last_report`,
+`max_gap_minutes`, `coverage_ok`, the selected `rh_sensor`, and station/WFO
+metadata. Missing, nonfinite, boolean QC markers, and out-of-range values are
+excluded; actual 0% is retained. Entirely missing windows have no row.
+
+Sensor preference per station/window is primary `relative_humidity_set_1`,
+then derived `set_1d`, then other sensor numbers. A sensor must have valid
+in-window reports. Sensors are never combined inside a window to lower the
+minimum or fill gaps. Sparse-window minima are retained, not presented as
+complete observations: `coverage_ok` requires no gap over 90 minutes,
+including gaps at both window boundaries. This is a reporting-coverage
+diagnostic, not proof of a continuously observed minimum. The fetch method's
+`max_gap_minutes` keyword can override that threshold.
+
+```powershell
+python -u run_obs_archiver.py --region alaska --element minrh `
+  --start "2026-05-01 00:00" --end "2026-05-31 23:59" --local
+```
+
+The daily wrapper includes OBS `minrh` by default; a custom `OBS_ELEMENTS`
+override must include it. Discovery uses the same fresh regional/all-status
+station inventory as other observations. HTTP/API failures retry and then
+fail the chunk rather than save partial station batches. Repeated windows
+replace earlier rows by station/date/window bounds. These full 12-hour OBS
+windows should not be matched automatically to NDFD first periods flagged
+with `window_duration_mismatch`. Verification-app support is separate work.
 
 ## NDFD minimum relative humidity
 
@@ -115,8 +154,8 @@ intervals, duplicate endpoints, and mismatched array steps still fail.
 Repeat MinRH writes deduplicate by station/initialization/valid time so added
 metadata does not duplicate previously archived forecasts.
 
-This adds forecast archiving only; observation MinRH aggregation and
-verification-app support are separate changes.
+Observed MinRH is described above; verification-app support remains a
+separate change.
 
 ## Standardized local NDFD layout
 

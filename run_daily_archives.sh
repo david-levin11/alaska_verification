@@ -71,7 +71,7 @@ declare -A AVAILABLE_FIELDS=(
 DEFAULT_NDFD_ELEMENTS=("Wind" "Gust" "rh" "minrh" "precip6hr" "maxt" "mint" "snow6hr")
 
 # OBS elements
-DEFAULT_OBS_ELEMENTS=("Wind" "rh" "precip24hr" "precip6hr" "maxt" "mint")
+DEFAULT_OBS_ELEMENTS=("Wind" "rh" "minrh" "precip24hr" "precip6hr" "maxt" "mint")
 
 # Hawaii shares the supported non-snow fields; no HRRR domain exists.
 DEFAULT_REFS_ELEMENTS="Wind rh precip6hr snow6hr temp2m"

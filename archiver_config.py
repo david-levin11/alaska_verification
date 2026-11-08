@@ -46,14 +46,16 @@ OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
             "snow72hr": ["precip_intervals", "precip_accum"],
             "maxt": ["air_temp"],
             "mint": ['air_temp'],
-            "rh": ['relative_humidity']}
+            "rh": ['relative_humidity'],
+            "minrh": ['relative_humidity']}
 # Need to set this up for precip24hr and maxt mint
 OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"],
                   "precip24hr": ["precip_24h"],
                   "precip6hr": ["precip_6h"],
                   "maxt": ["max_t"],
                   "mint": ["min_t"],
-                  "rh": ["relative_humidity_set_1"]}
+                  "rh": ["relative_humidity_set_1"],
+                  "minrh": ["relative_humidity_set_1"]}
 
 OBS_RENAME_MAP = {
     "Wind": {
