@@ -163,3 +163,61 @@ def test_production_writer_routing(tmp_path, region, local, element):
     ns[method.name](pd.Timestamp("2026-05-01"), pd.Timestamp("2026-05-31"), element, local, region)
     expected = str(model_root / f"ndfd/{element}/2026_05_archive.parquet") if local else f"s3://example/ndfd/2026_05_ndfd_{element}_archive.parquet"
     assert calls == [expected]
+
+
+@pytest.mark.parametrize('region', ['alaska', 'hawaii'])
+@pytest.mark.parametrize('local', [True, False])
+@pytest.mark.parametrize('start,end,expected', [
+    ('2026-05-15 06:00','2026-06-15 12:00',[
+        ('202605150600','202605312359','2026_05'),
+        ('202606010000','202606151200','2026_06')]),
+    ('2026-01-31','2026-03-02',[
+        ('202601310000','202601312359','2026_01'),
+        ('202602010000','202602282359','2026_02'),
+        ('202603010000','202603020000','2026_03')]),
+    ('2024-02-15','2024-03-01',[
+        ('202402150000','202402292359','2024_02'),
+        ('202403010000','202403010000','2024_03')]),
+    ('2026-12-15','2027-01-02',[
+        ('202612150000','202612312359','2026_12'),
+        ('202701010000','202701020000','2027_01')]),
+])
+def test_backfill_uses_calendar_month_chunks(tmp_path,region,local,start,end,expected):
+    # Exercise the real runner and real Parquet writes without network/GRIBs.
+    path=Path(__file__).parents[1]/'run_ndfd_archiver.py'
+    tree=ast.parse(path.read_text())
+    method=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_monthly_archiving')
+    model_root=tmp_path/('hawaii/model' if region=='hawaii' else 'model')
+    cfg=SimpleNamespace(configure_region=lambda r:None,TMP=str(tmp_path/'tmp'),
+        MODEL_DIR=str(model_root),NDFD_FILE_STRINGS={'minrh':['minrh']},
+        S3_URLS={'ndfd':'s3://example/ndfd/'})
+    windows=[]
+    writes=[]
+    def fetch(first,last):
+        windows.append((first,last))
+        return {'minrh':[first]}
+    def process(files):
+        ref=pd.to_datetime(files['minrh'][0],format='%Y%m%d%H%M')
+        return pd.DataFrame(dict(station_id=['PAJN'],init_time=[ref],
+            valid_time=[ref+pd.Timedelta(hours=18)],forecast_hour=[18],minrh=[42.]))
+    def write(data,destination,**options):
+        writes.append((destination,options))
+        # Redirect S3 writes to a local test file; retain the actual URL above.
+        target=Path(destination) if local else tmp_path/destination.rsplit('/',1)[1]
+        target.parent.mkdir(parents=True,exist_ok=True)
+        data.to_parquet(target,index=False)
+        stored=pd.read_parquet(target)
+        pd.testing.assert_frame_equal(data,stored)
+    fake=SimpleNamespace(fetch_file_list=fetch,process_files=process,
+        write_local_output=write,write_to_s3=write)
+    ns=dict(config=cfg,tempfile=SimpleNamespace(),pd=pd,os=os,shutil=shutil,
+        NDFDArchiver=lambda *a,**k:fake)
+    exec(compile(ast.Module(body=[method],type_ignores=[]),str(path),'exec'),ns)
+    ns[method.name](pd.Timestamp(start),pd.Timestamp(end),'minrh',local,region)
+    assert windows==[(first,last) for first,last,month in expected]
+    paths=[str(model_root/f'ndfd/minrh/{month}_archive.parquet') if local
+        else f's3://example/ndfd/{month}_ndfd_minrh_archive.parquet'
+        for first,last,month in expected]
+    assert [p for p,options in writes]==paths
+    assert all(options=={'dedup_columns':['station_id','init_time','valid_time']}
+        for p,options in writes)

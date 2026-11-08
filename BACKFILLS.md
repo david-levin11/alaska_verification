@@ -120,6 +120,15 @@ verification-app support are separate changes.
 
 ## Standardized local NDFD layout
 
+NDFD backfill chunks end at calendar-month boundaries. For example, a May 15
+through June 15 request processes May 15–31 into `2026_05_archive.parquet`,
+then June 1–15 into `2026_06_archive.parquet`. This applies to all NDFD
+elements, both regions, and local/S3 output. The existing source lookback and
+forecasts extending beyond a month remain unchanged; months identify request
+chunks, not a strict filter on forecast valid times. Updating code does not
+repair files produced by the old mid-month chunking; retain a backup before
+rebuilding affected months.
+
 New local NDFD writes use `model/ndfd/<element>/YYYY_MM_archive.parquet`, or
 `hawaii/model/ndfd/<element>/YYYY_MM_archive.parquet` for Hawaii. S3 routing and
 filenames are unchanged. Existing legacy files are not moved automatically.

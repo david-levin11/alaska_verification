@@ -3,7 +3,6 @@ import tempfile
 from ndfd_archiver import NDFDArchiver
 import archiver_config as config
 import pandas as pd
-from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
@@ -35,7 +34,8 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
     current = start
 
     while current <= end:
-        chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+        # Monthly filenames follow calendar months even for a mid-month start.
+        chunk_end = current.to_period("M").end_time.floor("min")
         if chunk_end > end:
             chunk_end = end
 
@@ -71,7 +71,7 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)
 
-        current += relativedelta(months=1)
+        current = chunk_end + pd.Timedelta(minutes=1)
 
 
 if __name__ == "__main__":
