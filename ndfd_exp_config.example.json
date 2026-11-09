@@ -1,0 +1,8 @@
+{
+  "input_dir": "/path/to/experimental_ndfd_exports",
+  "archive_root": "model",
+  "region": "alaska",
+  "max_distance_km": 5,
+  "recursive": false,
+  "elements": ["maxt", "mint", "minrh_native", "minrh", "wind", "gust", "precip6hr", "rh"]
+}
