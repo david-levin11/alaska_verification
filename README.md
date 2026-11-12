@@ -115,6 +115,12 @@ Have ideas for improvements or want to support additional datasets? Open a pull 
 ---
 
 
+## Experimental NDFD imports
+
+For ad hoc imports of local experimental NDFD NetCDF exports, see
+[EXPERIMENTAL_NDFD.md](EXPERIMENTAL_NDFD.md). The manual importer writes separate
+`model/ndfd_exp/` archives and supports a configurable input directory.
+
 ## REFS ensemble archiving
 
 See [REFS.md](REFS.md) for archiving the five RRFS perturbed members, combining
