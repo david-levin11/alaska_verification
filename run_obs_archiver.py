@@ -11,6 +11,8 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
     config.configure_region(region)
     if element.lower() == "wind":
         element = element.capitalize()  # "wind" → "Wind", etc.
+    elif element.lower() == 'minrh':
+        element = 'minrh'
     if element not in config.OBS_VARS:
         print(f"❌ Element '{element}' not recognized. Valid options: {list(config.OBS_VARS.keys())}")
         sys.exit(1)
@@ -26,7 +28,7 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
     # a new column that would be null for every legacy row during a merge.
     dedup_columns = (
         ["stid", "date", "window_start", "window_end"]
-        if element in ("maxt", "mint") else
+        if element in ("maxt", "mint", "minrh") else
         ["stid", "accum_hours", "end_time"]
         if element in ("precip6hr", "precip24hr") else None
     )
@@ -56,6 +58,8 @@ def run_monthly_obs_archiving(start, end, element, use_local, region='alaska'):
             df = archiver.fetch_tmin_00to18_timeseries(stations,current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
         elif element == "rh":
             df = archiver.fetch_observations(stations, current.strftime("%Y%m%d%H%M"), chunk_end.strftime("%Y%m%d%H%M"))
+        elif element == 'minrh':
+            df = archiver.fetch_minrh_18to06_timeseries(stations,current.strftime('%Y%m%d%H%M'),chunk_end.strftime('%Y%m%d%H%M'))
         print(df.head(10))
         #df.to_csv("test_obs.csv")
         if df.empty:

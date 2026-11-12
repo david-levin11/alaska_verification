@@ -3,7 +3,6 @@ import tempfile
 from ndfd_archiver import NDFDArchiver
 import archiver_config as config
 import pandas as pd
-from dateutil.relativedelta import relativedelta
 import shutil
 import os
 import sys
@@ -18,6 +17,8 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
     # Normalize element (e.g., wind → Wind)
     if element.lower() == "wind" or element.lower() == "gust":
         element = element.capitalize()  # "wind" → "Wind", etc.
+    elif element.lower() == "minrh":
+        element = "minrh"
 
     if element not in config.NDFD_FILE_STRINGS:
         print(f"❌ Element '{element}' not recognized. Valid options: {list(config.NDFD_FILE_STRINGS.keys())}")
@@ -33,7 +34,8 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
     current = start
 
     while current <= end:
-        chunk_end = (current + relativedelta(months=1)) - pd.Timedelta(minutes=1)
+        # Monthly filenames follow calendar months even for a mid-month start.
+        chunk_end = current.to_period("M").end_time.floor("min")
         if chunk_end > end:
             chunk_end = end
 
@@ -51,21 +53,25 @@ def run_monthly_archiving(start, end, element, use_local, region='alaska'):
             df = archiver.process_files(filtered_files)
             #print(f'Dataframe is: {df[df['station_id']=='PAJN'].head(10)}')
             filename = f"{current.year}_{current.month:02d}_ndfd_{element.lower()}_archive.parquet"
+            # Metadata columns can evolve without duplicating the same MinRH
+            # station/run/endpoint when an existing month is backfilled again.
+            write_options = ({'dedup_columns': ['station_id', 'init_time', 'valid_time']}
+                             if element == 'minrh' else {})
 
             if config.USE_CLOUD_STORAGE:
                 s3_url = f"{config.S3_URLS['ndfd']}{filename}"
-                archiver.write_to_s3(df, s3_url)
+                archiver.write_to_s3(df, s3_url, **write_options)
             else:
                 local_path = os.path.join(
                     config.MODEL_DIR, "ndfd", element.lower(),
                     f"{current.year}_{current.month:02d}_archive.parquet",
                 )
-                archiver.write_local_output(df, local_path)
+                archiver.write_local_output(df, local_path, **write_options)
 
         shutil.rmtree(config.TMP, ignore_errors=True)
         os.makedirs(config.TMP, exist_ok=True)
 
-        current += relativedelta(months=1)
+        current = chunk_end + pd.Timedelta(minutes=1)
 
 
 if __name__ == "__main__":

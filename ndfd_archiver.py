@@ -65,7 +65,7 @@ class NDFDArchiver(Archiver):
         elif self.config.ELEMENT == "snow6hr":
             speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
             dir_key = None
-        elif self.config.ELEMENT == "rh":
+        elif self.config.ELEMENT in ("rh", "minrh"):
             speed_key = self.config.NDFD_FILE_STRINGS[self.config.ELEMENT][0]
             dir_key = None
         else:

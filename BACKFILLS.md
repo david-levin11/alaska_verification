@@ -39,11 +39,134 @@ Example (all times UTC):
 python run_model_archiver.py --region alaska --model nbm --element maxt --start 202610250000 --end 202610251200 --local
 ```
 
-For these four QMD-sourced elements, use 00/06/12/18 UTC start/end hours, not
+For these QMD-sourced elements, use 00/06/12/18 UTC start/end hours, not
 NBM core's one-hour-offset cycles. Existing NBMQMD archives are not converted
 or moved; the deterministic values must be extracted from their source fields.
 
+### Deterministic NBM MinRH from QMD
+
+Use `--model nbm --element minrh`. This selects exactly the unannotated
+`MINRH:2 m above ground:<start>-<end> hour min fcst:` record from the QMD
+source file, excluding percentile/probability/mean/stddev records. Validate
+GRIB PDT 8, parameter 0/1/198, 2 m above ground, minimum statistic, 12-hour
+duration, explicit endpoint, and percent units. Preserve percent values (no
+temperature or precipitation conversion) in the single `minrh` output column.
+
+The source is NBMQMD, but archive identity is deterministic NBM:
+`model/nbm/minrh/YYYY_MM_archive.parquet`, or under `hawaii/` for Hawaii.
+This does not add a probabilistic NBMQMD MinRH element. The daily wrapper
+includes NBM `minrh` using the 00Z date window and the 00/12Z QMD source cycles.
+The checked 00Z feed contains leads 30,54,78,102,126,150,174; the 12Z feed
+contains 18,42,66,90,114,138,162. Each is a 12-hour minimum ending at 06Z;
+URL generation filters the lead schedule to the appropriate source cycle.
+
+```powershell
+python -u run_model_archiver.py --region alaska --model nbm --element minrh `
+  --start "2026-11-05 00:00" --end "2026-11-05 12:00" --local
+```
+
+These dates select initialization cycles, not observation/forecast valid dates.
+The existing model station inventory is used. Observed MinRH is described
+below; verification-app support remains separate work.
+
+## Observed minimum relative humidity
+
+`run_obs_archiver.py --element minrh` requests Synoptic relative-humidity
+time series and computes the minimum of valid reports in each daily
+**[18Z previous day, 06Z endpoint day)** window. Requested start/end times
+select 06Z endpoints inclusively; `date` is the endpoint's UTC calendar day,
+and `valid_time` equals `window_end`. A May 1 endpoint requests April 30 18Z
+warm-up data; monthly files are partitioned by endpoint month. Missing data
+in one period cannot shift or discard later periods.
+
+Output: `model/obs/minrh/YYYY_MM_archive.parquet`, or under `hawaii/` for
+Hawaii. Values are percentages in `minrh`, with `rh_units='%'`. Each row also
+contains `window_start`, `window_end`, `n_obs`, `first_report`, `last_report`,
+`max_gap_minutes`, `coverage_ok`, the selected `rh_sensor`, and station/WFO
+metadata. Missing, nonfinite, boolean QC markers, and out-of-range values are
+excluded; actual 0% is retained. Entirely missing windows have no row.
+
+Sensor preference per station/window is primary `relative_humidity_set_1`,
+then derived `set_1d`, then other sensor numbers. A sensor must have valid
+in-window reports. Sensors are never combined inside a window to lower the
+minimum or fill gaps. Sparse-window minima are retained, not presented as
+complete observations: `coverage_ok` requires no gap over 90 minutes,
+including gaps at both window boundaries. This is a reporting-coverage
+diagnostic, not proof of a continuously observed minimum. The fetch method's
+`max_gap_minutes` keyword can override that threshold.
+
+```powershell
+python -u run_obs_archiver.py --region alaska --element minrh `
+  --start "2026-05-01 00:00" --end "2026-05-31 23:59" --local
+```
+
+The daily wrapper includes OBS `minrh` by default; a custom `OBS_ELEMENTS`
+override must include it. Discovery uses the same fresh regional/all-status
+station inventory as other observations. HTTP/API failures retry and then
+fail the chunk rather than save partial station batches. Repeated windows
+replace earlier rows by station/date/window bounds. These full 12-hour OBS
+windows should not be matched automatically to NDFD first periods flagged
+with `window_duration_mismatch`. Verification-app support is separate work.
+
+## NDFD minimum relative humidity
+
+`run_ndfd_archiver.py --element minrh` archives the MinRH product separately
+from instantaneous `rh`. Alaska sources are
+`s3://noaa-ndfd-pds/wmo/minrh/YYYY/MM/DD/ZRRZ98_*` and `ZRRZ97_*`;
+Hawaii uses `ZRSZ98_*` and `ZRSZ97_*`. As with other NDFD elements,
+discovery selects the 11Z and 23Z issuance hours and includes a three-day lookback.
+The daily wrapper includes `minrh` by default in both regions. An explicitly
+configured `NDFD_ELEMENTS` override must include it to enable it.
+
+```powershell
+python -u run_ndfd_archiver.py --region alaska --element minrh `
+  --start "2026-11-04 00:00" --end "2026-11-04 23:59" --local
+```
+
+Local output: `model/ndfd/minrh/YYYY_MM_archive.parquet` (under `hawaii/`
+for Hawaii). Columns include `station_id`, `valid_time`, `forecast_hour`,
+`minrh` (percent), `init_time`, `window_start`, `window_end`, and `window_hours`.
+`forecast_hour` is the lead to the interval **end**, and `valid_time` equals
+`window_end`. Window bounds come from each source GRIB message; they are not
+assumed from filenames or a fixed daily schedule. Native percent values use
+the existing one-decimal RH rounding, without clipping or conversion.
+
+Real Alaska files from November 4, 2026, 11Z contain two short-range and five
+extended-range 12-hour minima covering 18Z–06Z. This is a checked example,
+not a hardcoded constraint on other issuances. Some ecCodes versions label
+the variable and units `unknown`; the reader verifies GRIB parameter
+0/1/198 (NOAA MinRH, percent), statistical processing=minimum, and consistent
+reference/interval/endpoint metadata before extracting the single field.
+The shared native decoder lock also protects these metadata reads.
+
+Some 00Z first periods have inconsistent source metadata: for example,
+`ZRRZ98_KWBN_202605122346` encodes a May 13 00Z reference and period start,
+a 12-hour duration, but an explicit end of May 13 06Z. ecCodes/cfgrib derives
+an incorrect 12Z endpoint from that duration. MinRH now matches array slices
+by their encoded steps, then assigns the explicit GRIB endpoint. This example
+is archived with `forecast_hour=6`, start=00Z, end=06Z, `window_hours=6`,
+`source_window_hours=12`, `encoded_forecast_hour=12`, and
+`window_duration_mismatch=True`. No pre-reference start or complete 12-hour
+coverage is inferred. The flag retains the ambiguity in the original interval
+metadata; consumers needing full comparable periods should exclude flagged
+rows. Normal periods have matching durations and a false flag. Invalid later
+intervals, duplicate endpoints, and mismatched array steps still fail.
+Repeat MinRH writes deduplicate by station/initialization/valid time so added
+metadata does not duplicate previously archived forecasts.
+
+Observed MinRH is described above; verification-app support remains a
+separate change.
+
 ## Standardized local NDFD layout
+
+NDFD backfill chunks end at calendar-month boundaries. For example, a May 15
+through June 15 request processes May 15–31 into `2026_05_archive.parquet`,
+then June 1–15 into `2026_06_archive.parquet`. This applies to all NDFD
+elements, both regions, and local/S3 output. The existing source lookback and
+forecasts extending beyond a month remain unchanged; months identify request
+chunks, not a strict filter on forecast valid times. Updating code does not
+repair files produced by the old mid-month chunking; retain a backup before
+rebuilding affected months.
 
 New local NDFD writes use `model/ndfd/<element>/YYYY_MM_archive.parquet`, or
 `hawaii/model/ndfd/<element>/YYYY_MM_archive.parquet` for Hawaii. S3 routing and

@@ -172,6 +172,51 @@ class ObsArchiver(Archiver):
         # assume YYYYmmddHHMM
         return pd.to_datetime(s, format="%Y%m%d%H%M", utc=True).floor("D")
 
+    def fetch_minrh_18to06_timeseries(self, station_ids, start_time, end_time, *, max_gap_minutes=90):
+        """Daily RH minima ending at 06Z within the requested UTC range.
+
+        Fetch 12h warm-up before the first endpoint, including month/year
+        boundaries. Partition by endpoint day; retain sparse report diagnostics.
+        """
+        from obs_minrh import COLUMNS, minrh_endpoints, aggregate_minrh
+        endpoints = minrh_endpoints(start_time,end_time)
+        if endpoints.empty:
+            return pd.DataFrame(columns=COLUMNS)
+        parts = []
+        for chunk in self._chunk_station_ids(list(dict.fromkeys(station_ids))):
+            wait = self.initial_wait
+            for attempt in range(self.max_retries):
+                try:
+                    params = dict(token=self.api_token,stid=','.join(chunk),
+                        start=(endpoints[0]-pd.Timedelta(hours=12)).strftime('%Y%m%d%H%M'),
+                        end=endpoints[-1].strftime('%Y%m%d%H%M'),vars='relative_humidity',
+                        obtimezone='utc',units='english',output='json',hfmetars=self.hfmetar)
+                    response = requests.get(self.url,params=params,timeout=90)
+                    response.raise_for_status()
+                    payload = response.json()
+                    code = str(payload.get('SUMMARY',{}).get('RESPONSE_CODE',''))
+                    if code == '2':
+                        print(f'OBS MinRH batch: requested={len(chunk)}, returned=0 (no data/access)')
+                        break
+                    if code != '1' or not isinstance(payload.get('STATION'),list):
+                        raise ValueError('Unexpected Synoptic MinRH response')
+                    units = payload.get('UNITS',{}).get('relative_humidity','%')
+                    if str(units).lower() not in ('%','percent','percentage'):
+                        raise ValueError('Unexpected relative humidity units')
+                    stations = [s for s in payload['STATION'] if s.get('STID') in chunk]
+                    parts.append(aggregate_minrh(stations,endpoints,getattr(self,'station_metadata',{}),
+                        max_gap_minutes=max_gap_minutes))
+                    print(f'OBS MinRH batch: requested={len(chunk)}, returned={len(stations)}')
+                    break
+                except Exception as error:
+                    # Exception URLs can contain the API token.
+                    print(f'OBS MinRH attempt {attempt+1}/{self.max_retries} failed: {type(error).__name__}')
+                    if attempt+1 == self.max_retries:
+                        raise RuntimeError(f'MinRH observation batch failed; stations={",".join(chunk)}') from None
+                    sleep(wait)
+                    wait *= 2
+        return pd.concat(parts,ignore_index=True) if parts else pd.DataFrame(columns=COLUMNS)
+
     def fetch_tmax_12to06_timeseries(self, station_ids, start_date, end_date, *, units="english"):
         """
         Max temperature over 12Z→06Z-next-day windows for each station and day.
@@ -537,6 +582,8 @@ if __name__ == "__main__":
         df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
     elif config.ELEMENT == "rh":
         df_obs = obs_archiver.fetch_observations(stations, config.OBS_START, config.OBS_END)
+    elif config.ELEMENT == "minrh":
+        df_obs = obs_archiver.fetch_minrh_18to06_timeseries(stations, config.OBS_START, config.OBS_END)
     elif config.ELEMENT == "maxt":
         df_obs = obs_archiver.fetch_tmax_12to06_timeseries(
         stations,

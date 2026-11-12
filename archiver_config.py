@@ -46,14 +46,16 @@ OBS_VARS = {"Wind": ["wind_direction", "wind_speed", "wind_gust"],
             "snow72hr": ["precip_intervals", "precip_accum"],
             "maxt": ["air_temp"],
             "mint": ['air_temp'],
-            "rh": ['relative_humidity']}
+            "rh": ['relative_humidity'],
+            "minrh": ['relative_humidity']}
 # Need to set this up for precip24hr and maxt mint
 OBS_PARSE_VARS = {"Wind": ["wind_direction_set_1", "wind_speed_set_1", "wind_gust_set_1"],
                   "precip24hr": ["precip_24h"],
                   "precip6hr": ["precip_6h"],
                   "maxt": ["max_t"],
                   "mint": ["min_t"],
-                  "rh": ["relative_humidity_set_1"]}
+                  "rh": ["relative_humidity_set_1"],
+                  "minrh": ["relative_humidity_set_1"]}
 
 OBS_RENAME_MAP = {
     "Wind": {
@@ -548,6 +550,9 @@ NDFD_DICT = {"Wind":
                  },
             "rh": 
                 {"rh": ["YRRZ98", "YRRZ97"]
+                 },
+            "minrh":
+                {"minrh": ["ZRRZ98", "ZRRZ97"]
                  }
             }
 
@@ -567,7 +572,8 @@ NDFD_FILE_STRINGS = {"Wind":["wspd", "wdir"],
                     "maxt": ["maxt"],
                     "mint": ["mint"],
                     "snow6hr": ["snow"],
-                    "rh": ["rh"]
+                    "rh": ["rh"],
+                    "minrh": ["minrh"]
                     }
 
 NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"],
@@ -576,7 +582,10 @@ NDFD_ELEMENT_STRINGS = {"Wind": ["si10", "wdir10"],
                         "maxt": ["tmax"],
                         "mint": ["tmin"],
                         "snow6hr": ["unknown"],
-                        "rh": ["r2"]
+                        "rh": ["r2"],
+                        # Some ecCodes tables call parameter 0/1/198 unknown.
+                        # The extractor validates the actual GRIB messages.
+                        "minrh": ["unknown"]
                     }
 
 ##################### AWS Params #################################
@@ -644,6 +653,14 @@ S3_URLS["rrfsens"] = "s3://alaska-verification/rrfsens/"
 
 # These deterministic fields come from QMD, but retain NBM archive identity.
 from nbm_deterministic import ELEMENTS as NBM_DETERMINISTIC_QMD_ELEMENTS
+# QMD source lookup only: MinRH is not exposed as a percentile NBMQMD element.
+# Filter this union to the source cycle's 06Z endpoints when building URLs.
+HERBIE_FORECASTS['nbmqmd']['minrh'] = list(range(18, 175, 12))
+HERBIE_XARRAY_STRINGS['minrh'] = {'nbmqmd': [':MINRH:2 m above ground:']}
+HERBIE_REQUIRED_PHRASES['minrh'] = {'nbmqmd': [':MINRH:2 m above ground:']}
+HERBIE_EXCLUDE_PHRASES['minrh'] = {}
+HERBIE_RENAME_MAP['minrh'] = {}
+HERBIE_UNIT_CONVERSIONS['minrh'] = {}
 for _element in NBM_DETERMINISTIC_QMD_ELEMENTS:
     if _element not in AVAILABLE_FIELDS['nbm']:
         AVAILABLE_FIELDS['nbm'].append(_element)
@@ -653,7 +670,8 @@ for _element in NBM_DETERMINISTIC_QMD_ELEMENTS:
     HERBIE_XARRAY_STRINGS[_element]['nbm'] = list(HERBIE_XARRAY_STRINGS[_element]['nbmqmd'])
     HERBIE_REQUIRED_PHRASES[_element]['nbm'] = list(HERBIE_XARRAY_STRINGS[_element]['nbmqmd'])
     HERBIE_EXCLUDE_PHRASES[_element]['nbm'] = ['% level', 'prob', 'ens mean', 'ens std dev']
-    HERBIE_RENAME_MAP[_element]['nbm'] = {'tp' if _element.startswith('precip') else 't2m': _element}
+    _source_var = 'minrh' if _element == 'minrh' else ('tp' if _element.startswith('precip') else 't2m')
+    HERBIE_RENAME_MAP[_element]['nbm'] = {_source_var: _element}
     HERBIE_UNIT_CONVERSIONS[_element]['nbm'] = {}
 
 # Region selection is explicit at entry points; importing config defaults to Alaska.
