@@ -2,7 +2,7 @@
 
 `import_ndfd_experimental.py` reads batches from a directory on the machine
 running the importer. It accepts `.nc`, `.nc.gz`, `.netcdf`, and `.netcdf.gz`.
-Run it manually after receiving exports; it is separate from the daily launcher.
+Run it manually after receiving exports, or enable the optional daily workflow below.
 It never downloads forecast grids or changes the source exports.
 
 ## Setup and configuration
@@ -10,7 +10,7 @@ It never downloads forecast grids or changes the source exports.
 Activate the existing archiving Python environment. The additional dependency is:
 
 ```sh
-python -m pip install "netCDF4>=1.7,<2"
+conda install -c conda-forge "netcdf4>=1.7,<2"
 ```
 
 Copy `ndfd_exp_config.example.json` to `ndfd_exp_config.json`, then edit
@@ -195,14 +195,92 @@ Values include compatibility columns `tmax`/`tmin` plus aliases `maxt`/`mint`,
 or `minrh`, in Fahrenheit/percent. Rows retain exact bounds, valid endpoint,
 report count, first/last reports, maximum gap, sensor, and available WFO metadata.
 
-These are manual commands and are not enabled in the daily wrapper. They write
-locally under the selected archive root, preview by default, and back up changed
+These commands write locally under the selected archive root, preview by default, and back up changed
 monthly files. Matching reruns are no-ops; changed observations require explicit
 `--replace-conflicts`. API failures exhaust retries and abort the current batch
 without saving partial results for that element/month; earlier completed
 element/month writes remain. The verification app must be configured separately
 to select the correct observation source and **both** window bounds. A matching
 endpoint alone does not make native and twelve-hour observations interchangeable.
+
+## Optional daily production workflow
+
+Experimental processing is disabled by default. On Linux, configure these
+settings in the existing launcher before calling the daily wrapper:
+
+```sh
+export RUN_NDFD_EXP=1
+export NDFD_EXP_INPUT_DIR=/data/experimental_ndfd_exports
+export NDFD_EXP_ARCHIVE_ROOT=/data/alaska_verification/model
+
+bash run_daily_archives.sh --region alaska
+```
+
+The input directory must already exist. The archive root is the local **model
+directory**, shared by `ndfd_exp/`, `obs_exp/`, and `obs_12hr/`. These products
+remain local even when other sources use `SOURCE_STORAGE=s3`. Configure the
+region and input directory separately for each regional launcher; do not feed
+Alaska grids into a Hawaii import. Repair old initialization timestamps before
+reimporting into an existing experimental root, as described above. The existing
+Python environment needs `netcdf4`; cron needs `SYNOPTIC_API_KEY` for discovery
+and observation requests.
+
+When enabled, the wrapper runs the experimental stages after the ordinary model,
+NDFD, OBS, and REFS work:
+
+1. Import the matching local NetCDF/gzip exports with `--allow-empty --apply`.
+2. Independently collect `obs_exp` for native windows in archived forecasts.
+3. Collect `obs_12hr` for the standard MaxT/MinT/MinRH windows.
+
+An existing input directory with **no matching exports is a successful skip**,
+logged as `SKIP: no NetCDF exports ...`. Unrelated files are ignored. A missing
+input directory remains an error, so a bad path or unavailable mount is not
+mistaken for a quiet day. Source files are not moved or deleted. Matching
+reimports are no-ops; all files in the directory are scanned each run. For files
+arriving during cron, copy using a nonmatching temporary suffix (for example
+`.part`), then rename to `.nc.gz` after the transfer is complete.
+
+Observation collection does not depend on a new file arriving or a successful
+import that day. It uses the saved forecast periods and queries only endpoints
+that have finished. Missing native products and dates with no matching native
+periods are successful skips, without observation API requests. The standalone
+observation runner also caps its requested endpoint at the current UTC time.
+
+By default both new observation profiles follow `RUN_NDFD_EXP`. Overrides:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `RUN_OBS_EXP` | `RUN_NDFD_EXP` | Enable native-window observations independently of importing new files |
+| `RUN_OBS_12HR` | `RUN_NDFD_EXP` | Enable twelve-hour observations, even without native forecasts |
+| `OBS_EXP_LOOKBACK_DAYS` | `7` | Retry the last seven completed UTC days for both profiles |
+| `NDFD_EXP_STATION_CSV` | unset | Optional fixed forecast station inventory |
+| `NDFD_EXP_RECURSIVE` | `0` | Search input subdirectories when `1` |
+| `NDFD_EXP_REPLACE_CONFLICTS` | `0` | Allow forecast revisions/mapping changes with backups when `1` |
+| `OBS_EXP_REPLACE_CONFLICTS` | `1` | Save updated/revised observations with backups |
+
+For a run dated November 30, the default observation endpoint range is November
+24 at 00Z through December 1 at 00Z, inclusive. This lookback lets later reports
+fill missing/sparse earlier periods. Explicit wrapper `--start/--end` bounds
+override that lookback for observations. The forecast importer always scans the
+whole configured directory; wrapper date bounds do not filter local files.
+No observations are fabricated for missing reports. To collect only native
+observations, set `RUN_OBS_12HR=0`. To continue observations while disabling
+new imports, set `RUN_NDFD_EXP=0 RUN_OBS_EXP=1` (and `RUN_OBS_12HR=1` if wanted).
+If exports arrive after their valid periods are older than the lookback, run
+the observation command with explicit historical bounds to backfill those dates.
+
+Each observation element/profile is attempted independently. A corrupt forecast
+file, exhausted API retries, or an observation write failure makes the overall
+wrapper return a nonzero status, but subsequent experimental observation jobs
+are still attempted. All logs go to the existing regional daily log. Preview
+the exact commands without executing them using:
+
+```sh
+DRY_RUN=1 bash run_daily_archives.sh --region alaska
+```
+
+This wrapper integration does not configure the verification app's observation
+source selection. That remains a separate app setting/change.
 
 ## Output and repeat runs
 

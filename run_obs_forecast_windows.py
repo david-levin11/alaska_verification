@@ -23,6 +23,7 @@ def main(argv=None):
     parser.add_argument('--end',required=True,help='Last UTC window endpoint, inclusive')
     parser.add_argument('--max-gap-minutes',type=float,default=90)
     parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--allow-empty',action='store_true',help='Skip absent native forecast products; intended for daily runs')
     parser.add_argument('--replace-conflicts',action='store_true')
     args = parser.parse_args(argv)
     start,end = utc_timestamp(args.start),utc_timestamp(args.end)
@@ -30,24 +31,34 @@ def main(argv=None):
         parser.error('start must not be after end')
     if not math.isfinite(args.max_gap_minutes) or args.max_gap_minutes<=0:
         parser.error('max-gap-minutes must be positive and finite')
+    end = min(end,pd.Timestamp.now(tz='UTC'))
+    if start>end:
+        print('SKIP: requested observation windows have not ended yet')
+        return 0
     import archiver_config as config
     from obs_archiver import ObsArchiver
     config.configure_region(args.region)
-    if not config.API_KEY:
-        parser.error('Set SYNOPTIC_API_KEY in the active environment')
     root = (args.archive_root or Path(config.MODEL_DIR)).resolve()
     forecast_root = (args.forecast_root or root/'ndfd_exp').resolve()
     model = 'obs_exp' if args.profile=='experimental' else 'obs_12hr'
     with archive_lock(root,args.apply,model=model):
         for element in args.elements:
+            periods = None
+            if args.profile=='experimental':
+                periods = native_periods(forecast_root,element,start,end,allow_missing=args.allow_empty)
+                if periods.empty:
+                    print(f'SKIP: {element} has no completed native forecast windows in the requested range')
+                    continue
+            if not config.API_KEY:
+                parser.error('Set SYNOPTIC_API_KEY in the active environment')
             config.ELEMENT = element
             archiver = ObsArchiver(config)
             # Obtain zone metadata using the shared all-status discovery.
             # Native forecasts supply the actual IDs to query, including any
             # historical IDs absent from the current discovery response.
             station_ids = archiver.get_station_metadata()
-            periods = (native_periods(forecast_root,element,start,end) if args.profile=='experimental'
-                else standard_periods(station_ids,element,start,end))
+            if periods is None:
+                periods = standard_periods(station_ids,element,start,end)
             if periods.empty:
                 print(f'{element}: no forecast windows in requested endpoint range')
                 continue

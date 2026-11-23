@@ -70,6 +70,7 @@ def main(argv=None):
     parser.add_argument('--elements',nargs='+',choices=ELEMENTS)
     parser.add_argument('--recursive',action='store_true',default=None)
     parser.add_argument('--apply',action='store_true',help='Install archives after validating each input file')
+    parser.add_argument('--allow-empty',action='store_true',help='Return success when an existing input directory has no matching exports')
     parser.add_argument('--replace-conflicts',action='store_true',help='Allow replacement after backup; also works in preview')
     args = parser.parse_args(argv)
     config = {}
@@ -106,7 +107,11 @@ def main(argv=None):
     if not isinstance(recursive,bool): parser.error('recursive must be a boolean')
     paths = input_dir.rglob('*') if recursive else input_dir.iterdir()
     files = sorted(p for p in paths if p.is_file() and p.name.lower().endswith(('.nc','.nc.gz','.netcdf','.netcdf.gz')))
-    if not files: parser.error(f'No NetCDF exports found in {input_dir}')
+    if not files:
+        if args.allow_empty:
+            print(f'SKIP: no NetCDF exports in {input_dir}')
+            return 0
+        parser.error(f'No NetCDF exports found in {input_dir}')
     check_archive_initialization(root)
     stations = load_stations(path_setting('station_csv'),region)
     cache = {}

@@ -26,6 +26,12 @@ if args[0] == 'run_model_archiver.py':
 if args[0] == 'run_refs_processing.py':
     if option('--elements') == os.environ.get('FAIL_REFS', ''):
         sys.exit(1)
+if args[0] == 'import_ndfd_experimental.py' and os.environ.get('FAIL_EXPERIMENTAL') == '1':
+    sys.exit(1)
+if args[0] == 'run_obs_forecast_windows.py':
+    if (option('--profile') == os.environ.get('FAIL_EXP_PROFILE', '')
+            and option('--elements') == os.environ.get('FAIL_EXP_ELEMENT', '')):
+        sys.exit(1)
 ''')
     fake.chmod(0o755)
     calls = tmp_path / 'calls.jsonl'
@@ -36,6 +42,7 @@ if args[0] == 'run_refs_processing.py':
                REFS_LOOKBACK_DAYS='2', SOURCE_STORAGE='local',
                REFS_THRESHOLD_CONFIG='/tmp/thresholds.json', FAIL_MODEL='',
                FAIL_ELEMENT='', FAIL_REFS='')
+    env.update(RUN_NDFD_EXP='0',RUN_OBS_EXP='',RUN_OBS_12HR='')
     env.update(settings)
     result = subprocess.run(['bash', str(script)] + (wrapper_args or ['2026-10-12']), env=env,
                             capture_output=True, text=True)

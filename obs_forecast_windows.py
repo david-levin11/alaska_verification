@@ -23,9 +23,11 @@ def validate_periods(periods):
     return periods.drop_duplicates().sort_values(['station_id','window_end','window_start']).reset_index(drop=True)
 
 
-def native_periods(root,element,start,end):
+def native_periods(root,element,start,end,*,allow_missing=False):
     paths = sorted((root/(element+'_native')).glob('*_archive.parquet'))
     if not paths:
+        if allow_missing:
+            return validate_periods(pd.DataFrame(columns=['station_id','window_start','window_end']))
         raise ValueError(f'No {element}_native archives under {root}; import/migrate forecasts first')
     # Initialization and valid months differ. Scan all monthly files and filter
     # by endpoint, never assume that an endpoint is in its initialization file.

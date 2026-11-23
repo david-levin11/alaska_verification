@@ -188,3 +188,22 @@ def test_no_data_response_and_all_missing_windows(source,monkeypatch):
     assert fetch_windows(archiver,p,'mint').empty
     times=pd.date_range('2026-06-01',periods=12,freq='h',tz='UTC')
     assert aggregate_windows([station(times,[None]*12)],p,'mint',{}).empty
+
+
+def test_empty_daily_native_archives_skip_without_api_key(tmp_path,monkeypatch,capsys):
+    import archiver_config as config
+    import run_obs_forecast_windows as runner
+    monkeypatch.setattr(config,'API_KEY','')
+    assert runner.main(['--archive-root',str(tmp_path),'--start','2026-06-01',
+        '--end','2026-06-02','--allow-empty','--apply'])==0
+    assert 'no completed native forecast windows' in capsys.readouterr().out
+    assert not list(tmp_path.glob('**/*.parquet'))
+    assert native_periods(tmp_path,'maxt','2026-06-01','2026-06-02',allow_missing=True).empty
+
+
+def test_future_observation_windows_skip_without_requests(tmp_path,capsys):
+    import run_obs_forecast_windows as runner
+    assert runner.main(['--profile','12hr','--archive-root',str(tmp_path),
+        '--start','2099-01-01','--end','2099-01-02','--apply'])==0
+    assert 'have not ended yet' in capsys.readouterr().out
+    assert not list(tmp_path.glob('**/*.parquet'))

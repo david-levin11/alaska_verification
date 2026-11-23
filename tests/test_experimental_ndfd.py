@@ -362,3 +362,18 @@ def test_initialization_repair_rejects_unknown_offset_and_duplicates(dataset,sta
     with pytest.raises(ValueError,match='duplicate station/run/window'):
         repair_plan(root)
     assert path.read_bytes()==before
+
+
+def test_empty_daily_input_skips_before_metadata_and_writes(tmp_path,capsys):
+    inputs=tmp_path/'incoming';inputs.mkdir()
+    args=['--input-dir',str(inputs),'--archive-root',str(tmp_path/'model'),
+        '--station-csv',str(tmp_path/'does_not_exist.csv'),'--apply']
+    with pytest.raises(SystemExit) as error:
+        main(args)
+    assert error.value.code==2
+    assert main(args+['--allow-empty'])==0
+    assert 'SKIP: no NetCDF exports' in capsys.readouterr().out
+    assert not (tmp_path/'model').exists()
+    with pytest.raises(SystemExit) as error:
+        main(['--input-dir',str(tmp_path/'missing'),'--allow-empty'])
+    assert error.value.code==2
