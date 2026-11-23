@@ -30,6 +30,7 @@ DERIVED = {
     'minrh': ('RH_SFC', ('%','percent'), 6, np.min, 'minimum_of_hourly_rh'),
 }
 ELEMENTS = tuple(FIELDS) + tuple(DERIVED)
+INITIALIZATION_OFFSET_HOURS = 72
 KEYS = ['station_id','init_time','valid_time','window_start','window_end']
 PROVENANCE = {'source_file','source_sha256','grid_latitude','grid_longitude','grid_distance_km'}
 
@@ -189,6 +190,7 @@ def records(mapping,init,starts,ends,values,value_names,instant,source,digest,**
     out['forecast_hour'] = (out.valid_time-init).dt.total_seconds()/3600
     out['forecast_hour_start'] = (out.window_start-init).dt.total_seconds()/3600
     out['forecast_hour_end'] = (out.window_end-init).dt.total_seconds()/3600
+    out['initialization_offset_hours'] = INITIALIZATION_OFFSET_HOURS
     out['window_hours'] = (out.window_end-out.window_start).dt.total_seconds()/3600
     for column in ('grid_latitude','grid_longitude','grid_distance_km'):
         out[column] = np.tile(mapping[column].to_numpy(),ntime)
@@ -206,7 +208,7 @@ def extract_file(source,stations,*,elements=ELEMENTS,max_distance_km=5,cache=Non
     frames,stats,read = {},{},{}
     with netcdf_path(source) as path, xr.open_dataset(path,engine='netcdf4',decode_cf=False,cache=False) as dataset:
         start_proc = datetime.strptime(str(dataset.attrs['startProcTime']),'%Y%m%d_%H%M')
-        init = pd.Timestamp(start_proc)-pd.Timedelta(hours=84)
+        init = pd.Timestamp(start_proc)-pd.Timedelta(hours=INITIALIZATION_OFFSET_HOURS)
         mapping,grid_dims,signature,rejected = station_mapping(dataset,stations,max_distance_km,cache)
         def get(name,units):
             if name not in read: read[name] = point_values(dataset,name,mapping,grid_dims,units)
@@ -276,11 +278,25 @@ def extract_file(source,stations,*,elements=ELEMENTS,max_distance_km=5,cache=Non
                 first_projection=float(frame.forecast_hour.min()),last_projection=float(frame.forecast_hour.max()),
                 missing_values={c:int(frame[c].isna().sum()) for c in value_cols})
         report = dict(source=str(source.resolve()),source_sha256=digest,init_time=str(init),
-            startProcTime=str(start_proc),grid_sha256=signature,grid_shape=list(dataset.latitude.shape),
+            startProcTime=str(start_proc),initialization_offset_hours=INITIALIZATION_OFFSET_HOURS,
+            grid_sha256=signature,grid_shape=list(dataset.latitude.shape),
             stations_selected=len(mapping),stations_rejected=rejected,elements=stats,
             creation_time=dataset.attrs.get('creationTimeString'),status='preview')
     if not frames: raise ValueError('No requested forecast fields could be extracted')
     return frames,report
+
+
+def check_archive_initialization(archive_root):
+    """Check all initialization months before a reimport can add shifted keys."""
+    import pyarrow.parquet as pq
+    for path in (Path(archive_root)/'ndfd_exp').glob('*/*_archive.parquet'):
+        parquet=pq.ParquetFile(path)
+        if not parquet.metadata.num_rows:
+            continue
+        marker='initialization_offset_hours'
+        if marker not in parquet.schema_arrow.names or not parquet.read(columns=[marker]).to_pandas()[marker].eq(INITIALIZATION_OFFSET_HOURS).all():
+            raise ValueError('Legacy experimental initialization timestamps found; '
+                'run repair_ndfd_exp_initialization.py before importing into this archive root')
 
 
 def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
@@ -293,7 +309,12 @@ def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
             old = ((existing or {}).get(destination) if destination in (existing or {}) else
                 (pd.read_parquet(destination) if destination.exists() else pd.DataFrame()))
             conflicts=0
+            samples=[]
             if not old.empty:
+                offsets=old.get('initialization_offset_hours',pd.Series(84,index=old.index))
+                if not offsets.eq(INITIALIZATION_OFFSET_HOURS).all():
+                    raise ValueError('Legacy experimental initialization timestamps found; '
+                        'run repair_ndfd_exp_initialization.py before appending new forecasts')
                 if element in ('maxt','mint') and old.get('statistic',pd.Series(dtype=str)).isin(['maximum','minimum']).any():
                     raise ValueError('Legacy native temperature records found; run migrate_ndfd_exp_temperatures.py before importing derived temperatures')
                 if not set(KEYS)<=set(old): raise ValueError(f'Existing file lacks import keys: {destination}')
@@ -305,14 +326,26 @@ def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
                     left,right = a.reindex(index=shared,columns=compare),b.reindex(index=shared,columns=compare)
                     equal = left.eq(right)|(left.isna()&right.isna())
                     conflicts = int((~equal.all(axis=1)).sum())
+                    for key in shared[~equal.all(axis=1).to_numpy()][:10]:
+                        changed = [c for c in compare if not equal.loc[key,c]]
+                        samples.append(dict(zip(KEYS,key),changes={
+                            c:{'old':left.loc[key,c],'new':right.loc[key,c]} for c in changed},
+                            old_source_sha256=a.loc[key].get('source_sha256'),
+                            new_source_sha256=b.loc[key].get('source_sha256'),
+                            old_grid={c:a.loc[key].get(c) for c in ('grid_latitude','grid_longitude','grid_distance_km')},
+                            new_grid={c:b.loc[key].get(c) for c in ('grid_latitude','grid_longitude','grid_distance_km')}))
                     if conflicts and not replace_conflicts:
-                        raise ValueError(f'{destination}: {conflicts} conflicting rows; preview/review then use --replace-conflicts')
+                        raise ValueError(f'{destination}: {conflicts} conflicting rows; '
+                            'use --replace-conflicts to replace them with backups on --apply')
                     # Identical forecasts are no-ops even if provenance differs.
                     unchanged = shared[equal.all(axis=1).to_numpy()]
                     new = new.loc[~pd.MultiIndex.from_frame(new[KEYS]).isin(unchanged)]
             if new.empty: continue
             combined = pd.concat([old,new],ignore_index=True).drop_duplicates(KEYS,keep='last').reset_index(drop=True)
-            plan.append((destination,combined,dict(new_or_replaced_rows=len(new),conflicts=conflicts)))
+            details=dict(new_or_replaced_rows=len(new),conflicts=conflicts)
+            if samples:
+                details['conflict_samples']=samples
+            plan.append((destination,combined,details))
     return plan
 
 

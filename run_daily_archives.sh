@@ -20,6 +20,10 @@
 #   NDFD_ELEMENTS="..."  # optional override for NDFD elements
 #   RUN_OBS=1            # 0 to skip the OBS loop
 #   OBS_ELEMENTS="..."   # optional override for OBS elements
+#   RUN_NDFD_EXP=1 NDFD_EXP_INPUT_DIR=/local/exports  # opt-in experimental workflow
+#   NDFD_EXP_ARCHIVE_ROOT=/local/model              # default: regional model/
+#   RUN_OBS_EXP=1 RUN_OBS_12HR=1                    # both follow RUN_OBS (default 1)
+#   OBS_EXP_LOOKBACK_DAYS=7                         # retry completed recent windows
 
 set -Eeuo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -57,6 +61,35 @@ case "$SOURCE_STORAGE" in
   s3) REFS_ARCHIVE_ROOT="${REFS_ARCHIVE_ROOT:-s3://alaska-verification/${REGION_PREFIX}}" ;;
   *) echo "SOURCE_STORAGE must be local or s3" >&2; exit 2 ;;
 esac
+
+# Experimental data are local files, independently of SOURCE_STORAGE.
+# Forecast imports are opt-in; observation profiles follow the daily OBS job.
+RUN_NDFD_EXP="${RUN_NDFD_EXP:-0}"
+RUN_OBS_EXP="${RUN_OBS_EXP:-${RUN_OBS:-1}}"
+RUN_OBS_12HR="${RUN_OBS_12HR:-${RUN_OBS:-1}}"
+NDFD_EXP_ARCHIVE_ROOT="${NDFD_EXP_ARCHIVE_ROOT:-${REGION_PREFIX}model}"
+NDFD_EXP_REPLACE_CONFLICTS="${NDFD_EXP_REPLACE_CONFLICTS:-0}"
+NDFD_EXP_RECURSIVE="${NDFD_EXP_RECURSIVE:-0}"
+OBS_EXP_REPLACE_CONFLICTS="${OBS_EXP_REPLACE_CONFLICTS:-1}"
+OBS_EXP_LOOKBACK_DAYS="${OBS_EXP_LOOKBACK_DAYS:-7}"
+for flag in RUN_NDFD_EXP RUN_OBS_EXP RUN_OBS_12HR NDFD_EXP_REPLACE_CONFLICTS NDFD_EXP_RECURSIVE OBS_EXP_REPLACE_CONFLICTS; do
+  [[ "${!flag}" =~ ^[01]$ ]] || { echo "$flag must be 0 or 1" >&2; exit 2; }
+done
+if [[ "$RUN_NDFD_EXP" == 1 ]]; then
+  [[ -n "${NDFD_EXP_INPUT_DIR:-}" && -d "$NDFD_EXP_INPUT_DIR" ]] || {
+    echo "RUN_NDFD_EXP=1 requires an existing NDFD_EXP_INPUT_DIR directory" >&2; exit 2;
+  }
+fi
+if [[ "$RUN_OBS_EXP" == 1 || "$RUN_OBS_12HR" == 1 ]]; then
+  [[ "$OBS_EXP_LOOKBACK_DAYS" =~ ^[1-9][0-9]*$ ]] || {
+    echo "OBS_EXP_LOOKBACK_DAYS must be a positive integer" >&2; exit 2;
+  }
+fi
+if [[ "$RUN_NDFD_EXP" == 1 || "$RUN_OBS_EXP" == 1 || "$RUN_OBS_12HR" == 1 ]]; then
+  [[ "$NDFD_EXP_ARCHIVE_ROOT" != *://* ]] || {
+    echo "NDFD_EXP_ARCHIVE_ROOT must be a local model directory" >&2; exit 2;
+  }
+fi
 
 declare -A AVAILABLE_FIELDS=(
   [nbm]="Wind snow6hr snow24hr snow48hr snow72hr precip6hr precip24hr maxt mint minrh"
@@ -332,6 +365,56 @@ if [[ "$RUN_OBS" == "1" ]]; then
   done
 else
   log_info "RUN_OBS=0 → skipping OBS loop." | tee -a "$LOG_FILE"
+fi
+
+# -------------------------------
+# Optional local experimental forecasts and matching observations
+# -------------------------------
+run_experimental_command() {
+  local label="$1"
+  shift
+  if [[ "${DRY_RUN:-0}" == 1 ]]; then
+    log_info "DRY_RUN: $*" | tee -a "$LOG_FILE"
+  elif "$@" >>"$LOG_FILE" 2>&1; then
+    log_info "OK: $label" | tee -a "$LOG_FILE"
+  else
+    log_error "FAILED: $label (see $LOG_FILE)" 2>&1 | tee -a "$LOG_FILE"
+    RC=1
+  fi
+}
+
+if [[ "$RUN_NDFD_EXP" == 1 ]]; then
+  exp_cmd=( python import_ndfd_experimental.py "${REGION_ARGS[@]}"
+            --input-dir "$NDFD_EXP_INPUT_DIR" --archive-root "$NDFD_EXP_ARCHIVE_ROOT"
+            --allow-empty --apply )
+  [[ "$NDFD_EXP_RECURSIVE" == 0 ]] || exp_cmd+=(--recursive)
+  [[ "$NDFD_EXP_REPLACE_CONFLICTS" == 0 ]] || exp_cmd+=(--replace-conflicts)
+  [[ -z "${NDFD_EXP_STATION_CSV:-}" ]] || exp_cmd+=(--station-csv "$NDFD_EXP_STATION_CSV")
+  run_experimental_command "experimental NDFD import" "${exp_cmd[@]}"
+fi
+
+if [[ "$RUN_OBS_EXP" == 1 || "$RUN_OBS_12HR" == 1 ]]; then
+  if [[ -n "${GLOBAL_START:-}" && -n "${GLOBAL_END:-}" ]]; then
+    EXP_OBS_START="$GLOBAL_START"
+    EXP_OBS_END="$GLOBAL_END"
+  else
+    EXP_OBS_START="$(date -u -d "${BASE_DATE} -$((OBS_EXP_LOOKBACK_DAYS-1)) days 00:00" +%Y%m%d%H%M)"
+    EXP_OBS_END="$(date -u -d "${BASE_DATE} +1 day 00:00" +%Y%m%d%H%M)"
+  fi
+  # These run even if there is no new file or the import reports a failure:
+  # full daily observation periods do not require any forecast archives.
+  for profile in experimental 12hr; do
+    [[ "$profile" != experimental || "$RUN_OBS_EXP" == 1 ]] || continue
+    [[ "$profile" != 12hr || "$RUN_OBS_12HR" == 1 ]] || continue
+    for element in maxt mint minrh; do
+      exp_obs_cmd=( python run_obs_forecast_windows.py "${REGION_ARGS[@]}"
+                    --profile "$profile" --archive-root "$NDFD_EXP_ARCHIVE_ROOT"
+                    --start "$EXP_OBS_START" --end "$EXP_OBS_END"
+                    --elements "$element" --allow-empty --apply )
+      [[ "$OBS_EXP_REPLACE_CONFLICTS" == 0 ]] || exp_obs_cmd+=(--replace-conflicts)
+      run_experimental_command "observations profile=$profile element=$element" "${exp_obs_cmd[@]}"
+    done
+  done
 fi
 
 exit "$RC"

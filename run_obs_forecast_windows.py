@@ -8,7 +8,8 @@ import pandas as pd
 
 from experimental_ndfd import install_plan
 from import_ndfd_experimental import archive_lock
-from obs_forecast_windows import native_periods,standard_periods,fetch_windows,observation_plan
+from obs_forecast_windows import (native_periods,standard_periods,experimental_periods,
+    validate_periods,fetch_windows,observation_plan)
 from obs_minrh import utc_timestamp
 
 
@@ -23,6 +24,7 @@ def main(argv=None):
     parser.add_argument('--end',required=True,help='Last UTC window endpoint, inclusive')
     parser.add_argument('--max-gap-minutes',type=float,default=90)
     parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--allow-empty',action='store_true',help='Compatibility option; forecast archives are optional')
     parser.add_argument('--replace-conflicts',action='store_true')
     args = parser.parse_args(argv)
     start,end = utc_timestamp(args.start),utc_timestamp(args.end)
@@ -30,24 +32,32 @@ def main(argv=None):
         parser.error('start must not be after end')
     if not math.isfinite(args.max_gap_minutes) or args.max_gap_minutes<=0:
         parser.error('max-gap-minutes must be positive and finite')
+    end = min(end,pd.Timestamp.now(tz='UTC'))
+    if start>end:
+        print('SKIP: requested observation windows have not ended yet')
+        return 0
     import archiver_config as config
     from obs_archiver import ObsArchiver
     config.configure_region(args.region)
-    if not config.API_KEY:
-        parser.error('Set SYNOPTIC_API_KEY in the active environment')
     root = (args.archive_root or Path(config.MODEL_DIR)).resolve()
     forecast_root = (args.forecast_root or root/'ndfd_exp').resolve()
     model = 'obs_exp' if args.profile=='experimental' else 'obs_12hr'
     with archive_lock(root,args.apply,model=model):
         for element in args.elements:
+            if not config.API_KEY:
+                parser.error('Set SYNOPTIC_API_KEY in the active environment')
             config.ELEMENT = element
             archiver = ObsArchiver(config)
-            # Obtain zone metadata using the shared all-status discovery.
-            # Native forecasts supply the actual IDs to query, including any
-            # historical IDs absent from the current discovery response.
+            # Always archive full daily periods for the regional inventory.
+            # Forecast files can add partial/unusual windows and historical IDs,
+            # but their existence never gates ordinary observation collection.
             station_ids = archiver.get_station_metadata()
-            periods = (native_periods(forecast_root,element,start,end) if args.profile=='experimental'
-                else standard_periods(station_ids,element,start,end))
+            if args.profile=='experimental':
+                scheduled = experimental_periods(station_ids,element,start,end)
+                additional = native_periods(forecast_root,element,start,end,allow_missing=True)
+                periods = validate_periods(pd.concat([scheduled,additional],ignore_index=True))
+            else:
+                periods = standard_periods(station_ids,element,start,end)
             if periods.empty:
                 print(f'{element}: no forecast windows in requested endpoint range')
                 continue

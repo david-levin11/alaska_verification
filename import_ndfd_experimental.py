@@ -9,7 +9,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from experimental_ndfd import ELEMENTS,extract_file,monthly_plan,install_plan
+from experimental_ndfd import ELEMENTS,extract_file,monthly_plan,install_plan,check_archive_initialization
 
 
 def load_stations(csv_path,region):
@@ -70,6 +70,7 @@ def main(argv=None):
     parser.add_argument('--elements',nargs='+',choices=ELEMENTS)
     parser.add_argument('--recursive',action='store_true',default=None)
     parser.add_argument('--apply',action='store_true',help='Install archives after validating each input file')
+    parser.add_argument('--allow-empty',action='store_true',help='Return success when an existing input directory has no matching exports')
     parser.add_argument('--replace-conflicts',action='store_true',help='Allow replacement after backup; also works in preview')
     args = parser.parse_args(argv)
     config = {}
@@ -106,19 +107,27 @@ def main(argv=None):
     if not isinstance(recursive,bool): parser.error('recursive must be a boolean')
     paths = input_dir.rglob('*') if recursive else input_dir.iterdir()
     files = sorted(p for p in paths if p.is_file() and p.name.lower().endswith(('.nc','.nc.gz','.netcdf','.netcdf.gz')))
-    if not files: parser.error(f'No NetCDF exports found in {input_dir}')
+    if not files:
+        if args.allow_empty:
+            print(f'SKIP: no NetCDF exports in {input_dir}')
+            return 0
+        parser.error(f'No NetCDF exports found in {input_dir}')
+    check_archive_initialization(root)
     stations = load_stations(path_setting('station_csv'),region)
     cache = {}
     pending = {}
     with archive_lock(root,args.apply):
+        if args.apply:
+            check_archive_initialization(root)
         for source in files:
             print(f'\nReading {source}',flush=True)
             frames,report = extract_file(source,stations,elements=elements,max_distance_km=distance,cache=cache)
             print(f'Initialization: {report["init_time"]}; stations selected={report["stations_selected"]}, '
                   f'rejected={len(report["stations_rejected"])}')
-            for element,details in report['elements'].items(): print(f'  {element}: {details}')
             plan = monthly_plan(frames,root,replace_conflicts=args.replace_conflicts,existing=pending)
-            for destination,_,details in plan: print(f'  {destination}: {details}')
+            print(f'Products extracted={len(frames)}; archive updates={len(plan)}; '
+                  f'new/replaced rows={sum(details["new_or_replaced_rows"] for _,_,details in plan)}; '
+                  f'conflicts={sum(details["conflicts"] for _,_,details in plan)}')
             if not plan:
                 print('UNCHANGED: matching forecasts already archived')
             elif args.apply:

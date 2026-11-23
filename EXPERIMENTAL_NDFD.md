@@ -2,7 +2,7 @@
 
 `import_ndfd_experimental.py` reads batches from a directory on the machine
 running the importer. It accepts `.nc`, `.nc.gz`, `.netcdf`, and `.netcdf.gz`.
-Run it manually after receiving exports; it is separate from the daily launcher.
+Run it manually after receiving exports, or enable the optional daily workflow below.
 It never downloads forecast grids or changes the source exports.
 
 ## Setup and configuration
@@ -10,7 +10,7 @@ It never downloads forecast grids or changes the source exports.
 Activate the existing archiving Python environment. The additional dependency is:
 
 ```sh
-python -m pip install "netCDF4>=1.7,<2"
+conda install -c conda-forge "netcdf4>=1.7,<2"
 ```
 
 Copy `ndfd_exp_config.example.json` to `ndfd_exp_config.json`, then edit
@@ -58,10 +58,39 @@ The supported export is the floating-point format with aligned two-dimensional
 packing attributes, or malformed validity arrays cause an error rather than an
 assumed conversion. Each spatial slice is read separately to limit memory use.
 
-Initialization is `startProcTime - 84 hours`, using the export convention
+Initialization is `startProcTime - 72 hours`, using the export convention
 confirmed for these files. For example, `20261109_0000` gives initialization
-`2026-11-05 12:00 UTC`. Filenames and creation timestamps do not set initialization.
+`2026-11-06 00:00 UTC`. Filenames and creation timestamps do not set initialization.
 All projections are retained, including f072 and projections beyond f168.
+Rows and manifests record `initialization_offset_hours=72`.
+
+### Correct archives written with the earlier 84-hour offset
+
+Before reimporting into an existing experimental archive root, preview and apply:
+
+```sh
+python repair_ndfd_exp_initialization.py --archive-root experimental_test/model
+python repair_ndfd_exp_initialization.py --archive-root experimental_test/model --apply
+```
+
+Use `--archive-root model` for production. This changes only experimental
+forecasts under `ndfd_exp`: initialization moves forward twelve hours, and
+`forecast_hour`, `forecast_hour_start`, and `forecast_hour_end` decrease by
+twelve hours. Values, valid times, native window bounds, and observation archives
+remain unchanged. Records are repartitioned when initialization crosses a month
+boundary. Originals are backed up; writes are staged, validated, and rolled back
+on caught errors using the same importer lock/manifest mechanism.
+
+Rows without an offset marker are recognized as the earlier 84-hour importer
+format; explicit 84-hour markers are also supported. Rows already marked 72
+remain unchanged, so repeating the repair is safe. Unknown offsets, inconsistent
+time/lead metadata, and duplicate keys after correction stop the repair before
+installation. Use this only for archives from this importer. Preview checks all
+affected elements before writing. Reimporting afterward adds any new products
+or stations normally; it does not create a second copy under the old run time.
+The importer checks all forecast months and rejects a root with unrepaired rows,
+including when corrected initialization would land in a different monthly file.
+A fresh output root does not need this repair.
 
 For grid i, `validTimes[2*i]` is its start and `validTimes[2*i+1]` its end.
 Timestamps are UTC, stored without a timezone like the other model archives.
@@ -130,14 +159,14 @@ so they are not a twelve-hour reference for the new forecasts.
 
 | Observation archive | Matching forecast | Periods |
 |---|---|---|
-| `model/obs_exp/maxt/` | `ndfd_exp/maxt_native/` | Exact archived forecast bounds, including partial first periods |
-| `model/obs_exp/mint/` | `ndfd_exp/mint_native/` | Exact archived forecast bounds |
-| `model/obs_exp/minrh/` | `ndfd_exp/minrh_native/` | Exact archived forecast bounds, including partial first periods |
-| `model/obs_12hr/maxt/` | `ndfd_exp/maxt/` and twelve-hour operational MaxT | 12Z–00Z |
-| `model/obs_12hr/mint/` | `ndfd_exp/mint/` and twelve-hour operational MinT | 00Z–12Z |
+| `model/obs_exp/maxt/` | `ndfd_exp/maxt_native/` | Daily 14Z–05Z (15h), plus additional archived forecast bounds |
+| `model/obs_exp/mint/` | `ndfd_exp/mint_native/` | Daily 02Z–20Z (18h), plus additional archived forecast bounds |
+| `model/obs_exp/minrh/` | `ndfd_exp/minrh_native/` | Daily 12Z–06Z (18h), plus additional archived forecast bounds |
+| `model/obs_12hr/maxt/` | Derived `ndfd_exp/maxt/` | 12Z–00Z |
+| `model/obs_12hr/mint/` | Derived `ndfd_exp/mint/` | 00Z–12Z |
 | `model/obs_12hr/minrh/` | `ndfd_exp/minrh/` and twelve-hour operational MinRH | 18Z–06Z |
 
-First import/migrate forecasts. Preview observation extraction, then add
+Forecast archives are optional. Preview observation extraction, then add
 `--apply` to write. These commands work in PowerShell and Linux shells:
 
 ```sh
@@ -147,15 +176,18 @@ python run_obs_forecast_windows.py --profile 12hr --archive-root model --start "
 
 Both profiles default to `maxt mint minrh`. Use `--elements maxt mint` for just
 temperatures. `--forecast-root` overrides the default `<archive-root>/ndfd_exp`
-for native extraction. Start/end select **window endpoints inclusively**.
+for optional additional native windows. Start/end select **window endpoints inclusively**.
 Archive filenames use the **endpoint month**; this differs from forecasts'
 initialization-month partitioning. Warm-up requests include the preceding day
 where required. Identical station/window pairs across forecast issuances are
 queried once; windows with the same endpoint but different starts remain separate.
 
-Both profiles require `SYNOPTIC_API_KEY`. Native extraction queries the exact
-station IDs in native forecast archives, even historical IDs absent from fresh
-metadata. The twelve-hour profile uses fresh shared all-status regional discovery.
+Both profiles require `SYNOPTIC_API_KEY` and use fresh shared all-status regional
+discovery for every daily window, independent of model files. The experimental
+profile additionally queries exact station/window pairs from native forecast
+archives when present, including partial/unusual periods and historical IDs
+absent from current metadata. Duplicate full windows are queried once. The
+regular experimental schedule follows the inspected export periods in the table.
 Aggregation uses all valid available reports within **[start,end)**, preferring
 one primary sensor per station/window with derived/secondary sensor fallback.
 It does not combine sensors, interpolate, or discard later valid windows after a
@@ -166,14 +198,104 @@ Values include compatibility columns `tmax`/`tmin` plus aliases `maxt`/`mint`,
 or `minrh`, in Fahrenheit/percent. Rows retain exact bounds, valid endpoint,
 report count, first/last reports, maximum gap, sensor, and available WFO metadata.
 
-These are manual commands and are not enabled in the daily wrapper. They write
-locally under the selected archive root, preview by default, and back up changed
+These commands write locally under the selected archive root, preview by default, and back up changed
 monthly files. Matching reruns are no-ops; changed observations require explicit
 `--replace-conflicts`. API failures exhaust retries and abort the current batch
 without saving partial results for that element/month; earlier completed
 element/month writes remain. The verification app must be configured separately
 to select the correct observation source and **both** window bounds. A matching
 endpoint alone does not make native and twelve-hour observations interchangeable.
+
+## Optional daily production workflow
+
+Experimental **forecast imports** are disabled by default. Both new observation
+profiles follow `RUN_OBS` (normally `1`), so they run every day even if no
+experimental forecast has ever been archived. The default output is the
+repository's ordinary regional `model/` directory: `model/ndfd_exp`,
+`model/obs_exp`, and `model/obs_12hr` for Alaska. No special output directory or
+archive-root setting is required. Enable forecast importing by adding these
+settings once to the existing Linux launcher that cron invokes:
+
+```sh
+export RUN_NDFD_EXP=1
+export NDFD_EXP_INPUT_DIR=/data/experimental_ndfd_exports
+export RUN_OBS_EXP=1
+export RUN_OBS_12HR=1
+
+bash run_daily_archives.sh --region alaska
+```
+
+Cron reuses that saved launcher configuration on every invocation; nobody needs
+to supply the input path manually on each run. Put the configuration in the
+launcher or cron environment, rather than only exporting it in an interactive
+terminal. The input directory must already exist. If production uses a custom
+archive location, optional `NDFD_EXP_ARCHIVE_ROOT` selects its local **model
+directory**, shared by `ndfd_exp/`, `obs_exp/`, and `obs_12hr/`. These products
+remain local even when other sources use `SOURCE_STORAGE=s3`. Configure the
+region and input directory separately for each regional launcher; do not feed
+Alaska grids into a Hawaii import. Repair old initialization timestamps before
+reimporting into an existing experimental root, as described above. The existing
+Python environment needs `netcdf4`; cron needs `SYNOPTIC_API_KEY` for discovery
+and observation requests.
+
+When enabled, the wrapper runs the experimental stages after the ordinary model,
+NDFD, OBS, and REFS work:
+
+1. Import the matching local NetCDF/gzip exports with `--allow-empty --apply`.
+2. Collect `obs_exp` for regular full native windows every day, adding any
+   partial/unusual periods found in existing forecasts.
+3. Collect `obs_12hr` for the standard MaxT/MinT/MinRH windows.
+
+An existing input directory with **no matching exports is a successful skip**,
+logged as `SKIP: no NetCDF exports ...`. Unrelated files are ignored. A missing
+input directory remains an error, so a bad path or unavailable mount is not
+mistaken for a quiet day. Source files are not moved or deleted. Matching
+reimports are no-ops; all files in the directory are scanned each run. For files
+arriving during cron, copy using a nonmatching temporary suffix (for example
+`.part`), then rename to `.nc.gz` after the transfer is complete.
+
+Observation collection does not depend on a new file arriving or a successful
+import that day, or on the existence of any native forecast archive. It builds
+the daily periods directly and queries only endpoints that have finished.
+The standalone observation runner caps its requested endpoint at the current
+UTC time. Additional archived forecast windows are optional; their absence
+does not suppress any scheduled observation period.
+
+By default both new observation profiles follow `RUN_OBS`. Overrides:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `RUN_OBS_EXP` | `RUN_OBS` (normally `1`) | Daily experimental native-window observations, with or without forecasts |
+| `RUN_OBS_12HR` | `RUN_OBS` (normally `1`) | Daily twelve-hour observations, with or without forecasts |
+| `OBS_EXP_LOOKBACK_DAYS` | `7` | Retry the last seven completed UTC days for both profiles |
+| `NDFD_EXP_STATION_CSV` | unset | Optional fixed forecast station inventory |
+| `NDFD_EXP_RECURSIVE` | `0` | Search input subdirectories when `1` |
+| `NDFD_EXP_REPLACE_CONFLICTS` | `0` | Allow forecast revisions/mapping changes with backups when `1` |
+| `OBS_EXP_REPLACE_CONFLICTS` | `1` | Save updated/revised observations with backups |
+
+For a run dated November 30, the default observation endpoint range is November
+24 at 00Z through December 1 at 00Z, inclusive. This lookback lets later reports
+fill missing/sparse earlier periods. Explicit wrapper `--start/--end` bounds
+override that lookback for observations. The forecast importer always scans the
+whole configured directory; wrapper date bounds do not filter local files.
+No observations are fabricated for missing reports. To collect only native
+observations, set `RUN_OBS_12HR=0`. To continue observations while disabling
+new imports, set `RUN_NDFD_EXP=0 RUN_OBS_EXP=1` (and `RUN_OBS_12HR=1` if wanted).
+If exports arrive after their valid periods are older than the lookback, run
+the observation command with explicit historical bounds to backfill those dates.
+
+Each observation element/profile is attempted independently. A corrupt forecast
+file, exhausted API retries, or an observation write failure makes the overall
+wrapper return a nonzero status, but subsequent experimental observation jobs
+are still attempted. All logs go to the existing regional daily log. Preview
+the exact commands without executing them using:
+
+```sh
+DRY_RUN=1 bash run_daily_archives.sh --region alaska
+```
+
+This wrapper integration does not configure the verification app's observation
+source selection. That remains a separate app setting/change.
 
 ## Output and repeat runs
 
@@ -198,7 +320,14 @@ station selection, validity ranges, missing values, and changed destinations.
 Reruns skip matching records. Keys include station, initialization, valid time,
 and both window bounds. Conflicting values stop the import by default. To review
 an intentional revision, preview with `--replace-conflicts`; then add `--apply`
-to install it with backups. Changed period bounds represent different records;
+to install it with backups. Console output shows concise product, update, row,
+and conflict counts. Detailed period/coverage statistics and up to ten conflict
+samples per file (changed values, source hashes, and extraction coordinates)
+are retained in the installation manifest rather than printed. Fresh Synoptic inventories
+can change station coordinates and consequently the selected grid point; new
+station IDs alone do not create conflicts with existing keys. Identical source
+hashes plus changed extraction coordinates help distinguish a station-mapping
+change from a different export. Changed period bounds represent different records;
 replacing an entire superseded issuance with different periods requires review
 and removal of those obsolete records separately.
 
