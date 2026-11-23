@@ -16,15 +16,20 @@ from scipy.spatial import cKDTree
 import xarray as xr
 
 FIELDS = {
-    'maxt': ('MaxT_SFC','maxt',('f','degf','fahrenheit','°f'),'maximum'),
-    'mint': ('MinT_SFC','mint',('f','degf','fahrenheit','°f'),'minimum'),
+    'maxt_native': ('MaxT_SFC','maxt',('f','degf','fahrenheit','°f'),'maximum'),
+    'mint_native': ('MinT_SFC','mint',('f','degf','fahrenheit','°f'),'minimum'),
     'minrh_native': ('MinRH_SFC','minrh',('%','percent'),'minimum'),
     'wind': ('Wind_Mag_SFC','wind_speed_kt',('kts','kt','knots'),'instant'),
     'gust': ('WindGust_SFC','wind_gust_kt',('kts','kt','knots'),'instant'),
     'precip6hr': ('QPF_SFC','precip6hr',('in','inch','inches'),'accumulation'),
     'rh': ('RH_SFC','rh',('%','percent'),'instant'),
 }
-ELEMENTS = tuple(FIELDS) + ('minrh',)
+DERIVED = {
+    'maxt': ('T_SFC', ('f','degf','fahrenheit','°f'), 0, np.max, 'maximum_of_hourly_temperature'),
+    'mint': ('T_SFC', ('f','degf','fahrenheit','°f'), 12, np.min, 'minimum_of_hourly_temperature'),
+    'minrh': ('RH_SFC', ('%','percent'), 6, np.min, 'minimum_of_hourly_rh'),
+}
+ELEMENTS = tuple(FIELDS) + tuple(DERIVED)
 KEYS = ['station_id','init_time','valid_time','window_start','window_end']
 PROVENANCE = {'source_file','source_sha256','grid_latitude','grid_longitude','grid_distance_km'}
 
@@ -207,7 +212,7 @@ def extract_file(source,stations,*,elements=ELEMENTS,max_distance_km=5,cache=Non
             if name not in read: read[name] = point_values(dataset,name,mapping,grid_dims,units)
             return read[name]
         for element in elements:
-            if element=='minrh': continue
+            if element in DERIVED: continue
             variable,column,units,statistic = FIELDS[element]
             needed = [variable]+(['Wind_Dir_SFC'] if element=='wind' else [])
             if not all(v in dataset for v in needed):
@@ -224,41 +229,46 @@ def extract_file(source,stations,*,elements=ELEMENTS,max_distance_km=5,cache=Non
                 arrays.append(direction);columns.append('wind_dir_deg')
             frames[element] = records(mapping,init,starts,ends,arrays,columns,statistic=='instant',source,digest,
                 statistic=statistic)
-        if 'minrh' in elements:
-            if 'RH_SFC' not in dataset:
-                stats['minrh'] = {'status':'missing_variable','required':['RH_SFC']}
-            else:
-                starts,ends,values = get('RH_SFC',('%','percent'))
-                if not ((ends-starts)==pd.Timedelta(hours=1)).all():
-                    raise ValueError('Derived 12h MinRH requires hourly RH validity blocks')
-                if starts.has_duplicates: raise ValueError('Duplicate RH valid times')
-                groups=[]
-                candidates = pd.date_range(starts.min().normalize()+pd.Timedelta(hours=6),
-                    ends.max().normalize()+pd.Timedelta(hours=6),freq='D')
-                skipped=0
-                skipped_station_windows=0
-                for endpoint in candidates:
-                    begin = endpoint-pd.Timedelta(hours=12)
-                    expected = pd.date_range(begin,periods=12,freq='h')
-                    indices = starts.get_indexer(expected)
-                    if (indices<0).any():
-                        skipped += 1
-                        skipped_station_windows += len(mapping)
-                        continue
-                    subset = values[indices]
-                    complete = np.isfinite(subset).all(axis=0)
-                    skipped_station_windows += int((~complete).sum())
-                    if not complete.any():
-                        skipped += 1
-                        continue
-                    selected = mapping.loc[complete].reset_index(drop=True)
-                    minimum = subset[:,complete].min(axis=0)[None,:]
-                    groups.append(records(selected,init,pd.DatetimeIndex([begin]),pd.DatetimeIndex([endpoint]),
-                        [minimum],['minrh'],False,source,digest,statistic='minimum_of_hourly_rh',n_samples=12,
-                        coverage_complete=True))
-                stats['minrh'] = {'incomplete_or_unavailable_windows':skipped,
-                    'incomplete_station_windows':skipped_station_windows}
-                if groups: frames['minrh'] = pd.concat(groups,ignore_index=True)
+        for element in elements:
+            if element not in DERIVED:
+                continue
+            variable, units, endpoint_hour, reduction, statistic = DERIVED[element]
+            if variable not in dataset:
+                stats[element] = {'status':'missing_variable','required':[variable]}
+                continue
+            starts,ends,values = get(variable,units)
+            if not ((ends-starts)==pd.Timedelta(hours=1)).all():
+                raise ValueError(f'Derived 12h {element} requires hourly validity blocks')
+            if starts.has_duplicates:
+                raise ValueError(f'Duplicate {variable} valid times')
+            groups=[]
+            candidates = pd.date_range(starts.min().normalize()+pd.Timedelta(hours=endpoint_hour),
+                ends.max().normalize()+pd.Timedelta(hours=endpoint_hour),freq='D')
+            skipped=0
+            skipped_station_windows=0
+            for endpoint in candidates:
+                begin = endpoint-pd.Timedelta(hours=12)
+                expected = pd.date_range(begin,periods=12,freq='h')
+                indices = starts.get_indexer(expected)
+                if (indices<0).any():
+                    skipped += 1
+                    skipped_station_windows += len(mapping)
+                    continue
+                subset = values[indices]
+                complete = np.isfinite(subset).all(axis=0)
+                skipped_station_windows += int((~complete).sum())
+                if not complete.any():
+                    skipped += 1
+                    continue
+                selected = mapping.loc[complete].reset_index(drop=True)
+                extrema = reduction(subset[:,complete],axis=0)[None,:]
+                groups.append(records(selected,init,pd.DatetimeIndex([begin]),pd.DatetimeIndex([endpoint]),
+                    [extrema],[element],False,source,digest,statistic=statistic,n_samples=12,
+                    coverage_complete=True))
+            stats[element] = {'incomplete_or_unavailable_windows':skipped,
+                'incomplete_station_windows':skipped_station_windows}
+            if groups:
+                frames[element] = pd.concat(groups,ignore_index=True)
         for element,frame in frames.items():
             value_cols = [c for c in frame if c in ('maxt','mint','minrh','wind_speed_kt','wind_dir_deg','wind_gust_kt','precip6hr','rh')]
             stats.setdefault(element,{}).update(rows=len(frame),periods=frame.window_start.nunique(),
@@ -284,6 +294,8 @@ def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
                 (pd.read_parquet(destination) if destination.exists() else pd.DataFrame()))
             conflicts=0
             if not old.empty:
+                if element in ('maxt','mint') and old.get('statistic',pd.Series(dtype=str)).isin(['maximum','minimum']).any():
+                    raise ValueError('Legacy native temperature records found; run migrate_ndfd_exp_temperatures.py before importing derived temperatures')
                 if not set(KEYS)<=set(old): raise ValueError(f'Existing file lacks import keys: {destination}')
                 if old.duplicated(KEYS).any(): raise ValueError(f'Existing duplicate keys: {destination}')
                 a,b = old.set_index(KEYS),new.set_index(KEYS)
@@ -304,9 +316,9 @@ def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
     return plan
 
 
-def install_plan(plan,report,archive_root):
+def install_plan(plan,report,archive_root,*,model='ndfd_exp'):
     """Stage and validate all files before backup/install; roll back exceptions."""
-    root = Path(archive_root)/'ndfd_exp'
+    root = Path(archive_root)/model
     import_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'_'+uuid4().hex[:8]
     backup = root/'import_backups'/import_id
     backup.mkdir(parents=True,exist_ok=False)

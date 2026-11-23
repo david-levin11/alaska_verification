@@ -4,5 +4,5 @@
   "region": "alaska",
   "max_distance_km": 5,
   "recursive": false,
-  "elements": ["maxt", "mint", "minrh_native", "minrh", "wind", "gust", "precip6hr", "rh"]
+  "elements": ["maxt_native", "mint_native", "maxt", "mint", "minrh_native", "minrh", "wind", "gust", "precip6hr", "rh"]
 }

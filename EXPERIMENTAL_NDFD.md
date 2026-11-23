@@ -70,8 +70,10 @@ hours at both bounds. `forecast_hour` corresponds to `valid_time`.
 
 | Directory | Source variable | Value column | Valid time / units |
 |---|---|---|---|
-| `maxt` | `MaxT_SFC` | `maxt` | Native period end / F |
-| `mint` | `MinT_SFC` | `mint` | Native period end / F |
+| `maxt_native` | `MaxT_SFC` | `maxt` | Native period end / F |
+| `mint_native` | `MinT_SFC` | `mint` | Native period end / F |
+| `maxt` | Derived from `T_SFC` | `maxt` | Twelve-hour period ending 00Z / F |
+| `mint` | Derived from `T_SFC` | `mint` | Twelve-hour period ending 12Z / F |
 | `minrh_native` | `MinRH_SFC` | `minrh` | Native period end / % |
 | `wind` | `Wind_Mag_SFC`, `Wind_Dir_SFC` | `wind_speed_kt`, `wind_dir_deg` | Instantaneous at period start / knots, degrees |
 | `gust` | `WindGust_SFC` | `wind_gust_kt` | Instantaneous at period start / knots |
@@ -79,19 +81,99 @@ hours at both bounds. `forecast_hour` corresponds to `valid_time`.
 | `rh` | `RH_SFC` | `rh` | Instantaneous at period start / % |
 | `minrh` | Derived from `RH_SFC` | `minrh` | Twelve-hour period ending 06Z / % |
 
-Native extrema periods remain intact, including partial first periods and the
-18-hour MinRH. The separate `minrh` product uses hourly RH at 18Z through 05Z,
-representing **[18Z, 06Z)**. It requires all twelve hourly timestamps and twelve
-finite values for each station. Incomplete windows are omitted and counted in
-the report. This is a minimum of hourly instantaneous RH samples; it cannot
-capture a minimum between those samples. It does not shorten or reinterpret the
-native 18-hour minimum. Verification should match actual window bounds,
-especially for native temperature extrema with nonstandard durations.
+Native extrema periods remain intact, including partial first periods. In the
+inspected export, complete native MaxT spans **14Z–05Z next day (15h)**, MinT
+**02Z–20Z (18h)**, and MinRH **12Z–06Z next day (18h)**. These source periods
+are never relabeled as twelve hours.
+
+The derived products use separate hourly variables: MaxT is the maximum of
+`T_SFC` at **12Z through 23Z**, MinT the minimum at **00Z through 11Z**, and
+MinRH the minimum of `RH_SFC` at **18Z through 05Z**. Windows are half-open:
+**[12Z,00Z)**, **[00Z,12Z)**, and **[18Z,06Z)**, respectively. Each requires
+all twelve hourly timestamps and twelve finite values for each station.
+Incomplete windows are omitted and counted in the report. These are extrema
+of hourly instantaneous samples; extrema between samples may be missed.
+Native extrema may be prepared independently and need not equal extrema of
+the hourly variables. Missing hourly variables do not fall back to native grids.
 
 Missing variables are reported and available requested products are processed.
 Wind speed and direction must both be present in the same file with matching
 periods. Fields split across separate files can otherwise be imported in the
-same batch; the importer does not assemble RH time windows across separate files.
+same batch; the importer does not assemble hourly time windows across separate files.
+
+## Upgrade existing experimental temperature archives
+
+Earlier importer versions placed native extrema in `maxt/` and `mint/`. Migrate
+those before importing the newly derived twelve-hour products:
+
+```sh
+python migrate_ndfd_exp_temperatures.py --archive-root model
+python migrate_ndfd_exp_temperatures.py --archive-root model --apply
+```
+
+This preserves the old rows under `maxt_native/` and `mint_native/`, stages and
+validates the changes, and backs up the original files. The old directories
+contain empty monthly files until the NetCDF exports are reimported. Rerun
+`import_ndfd_experimental.py` with the same input directory and `--apply` to
+populate the derived temperature products. If an existing configuration has an
+explicit `elements` list, add `maxt_native` and `mint_native` alongside `maxt`
+and `mint`; the example configuration includes both. Matching reruns are safe.
+The importer rejects unmigrated native temperature rows in derived directories,
+even with `--replace-conflicts`, to prevent mixing period definitions.
+
+## Observations for the two sets of periods
+
+`run_obs_forecast_windows.py` provides two separate observation archives. The
+existing OBS runner and files are unchanged. Its legacy temperature methods
+currently use **12Z–06Z for MaxT** and **00Z–18Z for MinT** (both 18 hours),
+so they are not a twelve-hour reference for the new forecasts.
+
+| Observation archive | Matching forecast | Periods |
+|---|---|---|
+| `model/obs_exp/maxt/` | `ndfd_exp/maxt_native/` | Exact archived forecast bounds, including partial first periods |
+| `model/obs_exp/mint/` | `ndfd_exp/mint_native/` | Exact archived forecast bounds |
+| `model/obs_exp/minrh/` | `ndfd_exp/minrh_native/` | Exact archived forecast bounds, including partial first periods |
+| `model/obs_12hr/maxt/` | `ndfd_exp/maxt/` and twelve-hour operational MaxT | 12Z–00Z |
+| `model/obs_12hr/mint/` | `ndfd_exp/mint/` and twelve-hour operational MinT | 00Z–12Z |
+| `model/obs_12hr/minrh/` | `ndfd_exp/minrh/` and twelve-hour operational MinRH | 18Z–06Z |
+
+First import/migrate forecasts. Preview observation extraction, then add
+`--apply` to write. These commands work in PowerShell and Linux shells:
+
+```sh
+python run_obs_forecast_windows.py --profile experimental --archive-root model --start "2026-11-09 00:00" --end "2026-11-14 23:59"
+python run_obs_forecast_windows.py --profile 12hr --archive-root model --start "2026-11-09 00:00" --end "2026-11-14 23:59"
+```
+
+Both profiles default to `maxt mint minrh`. Use `--elements maxt mint` for just
+temperatures. `--forecast-root` overrides the default `<archive-root>/ndfd_exp`
+for native extraction. Start/end select **window endpoints inclusively**.
+Archive filenames use the **endpoint month**; this differs from forecasts'
+initialization-month partitioning. Warm-up requests include the preceding day
+where required. Identical station/window pairs across forecast issuances are
+queried once; windows with the same endpoint but different starts remain separate.
+
+Both profiles require `SYNOPTIC_API_KEY`. Native extraction queries the exact
+station IDs in native forecast archives, even historical IDs absent from fresh
+metadata. The twelve-hour profile uses fresh shared all-status regional discovery.
+Aggregation uses all valid available reports within **[start,end)**, preferring
+one primary sensor per station/window with derived/secondary sensor fallback.
+It does not combine sensors, interpolate, or discard later valid windows after a
+gap. Entirely missing station-windows are omitted and counted; sparse extrema
+are retained with `coverage_ok=False`. Coverage requires no gap over 90 minutes,
+including gaps to both bounds (`--max-gap-minutes` changes that threshold).
+Values include compatibility columns `tmax`/`tmin` plus aliases `maxt`/`mint`,
+or `minrh`, in Fahrenheit/percent. Rows retain exact bounds, valid endpoint,
+report count, first/last reports, maximum gap, sensor, and available WFO metadata.
+
+These are manual commands and are not enabled in the daily wrapper. They write
+locally under the selected archive root, preview by default, and back up changed
+monthly files. Matching reruns are no-ops; changed observations require explicit
+`--replace-conflicts`. API failures exhaust retries and abort the current batch
+without saving partial results for that element/month; earlier completed
+element/month writes remain. The verification app must be configured separately
+to select the correct observation source and **both** window bounds. A matching
+endpoint alone does not make native and twelve-hour observations interchangeable.
 
 ## Output and repeat runs
 
@@ -131,7 +213,7 @@ the same `ndfd_exp` files concurrently.
 ## Validation
 
 ```sh
-python -m pytest -q tests/test_experimental_ndfd.py
+python -m pytest -q tests/test_experimental_ndfd.py tests/test_obs_forecast_windows.py
 ```
 
 Tests generate real NetCDF, gzip, and Parquet files matching the supplied

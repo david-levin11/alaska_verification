@@ -41,11 +41,11 @@ def load_stations(csv_path,region):
 
 
 @contextmanager
-def archive_lock(root,apply):
+def archive_lock(root,apply,*,model='ndfd_exp'):
     if not apply:
         yield
         return
-    root = Path(root)/'ndfd_exp'
+    root = Path(root)/model
     root.mkdir(parents=True,exist_ok=True)
     lock = root/'.import.lock'
     try:

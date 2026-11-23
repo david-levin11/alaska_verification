@@ -39,6 +39,8 @@ def dataset():
     times = pd.date_range(start-pd.Timedelta(hours=12),start+pd.Timedelta(days=5),freq='h')
     add('RH_SFC',times,1,'%',60)
     data.RH_SFC.values[(times.hour>=6)&(times.hour<18)] = 5
+    add('T_SFC',times,1,'F',10)
+    data.T_SFC.values[(times.hour>=12)] = 40
     return data
 
 
@@ -56,14 +58,23 @@ def write(dataset,path):
 def test_all_fields_native_timing_derived_windows_and_domain(dataset,stations,tmp_path):
     source = write(dataset,tmp_path/'VRH_Fcst_ext_20261109_1200.nc')
     frames,report = extract_file(source,stations)
-    assert set(frames)=={'wind','gust','precip6hr','maxt','mint','minrh_native','rh','minrh'}
+    assert set(frames)=={'wind','gust','precip6hr','maxt','mint','maxt_native','mint_native','minrh_native','rh','minrh'}
     assert report['init_time']=='2026-11-05 12:00:00'
     assert report['stations_selected']==2
     assert {r['stid']:r['reason'] for r in report['stations_rejected']}=={'OUT':'outside_grid','FAR':'too_far_from_grid_point'}
     assert frames['rh'].forecast_hour.min()==72
     assert frames['wind'].forecast_hour.min()==84 and frames['wind'].forecast_hour.max()>168
-    assert frames['maxt'].forecast_hour.min()==89
-    assert frames['maxt'].window_hours.unique().tolist()==[5.,15.]
+    assert frames['maxt_native'].forecast_hour.min()==89
+    assert frames['maxt_native'].window_hours.unique().tolist()==[5.,15.]
+    assert frames['mint_native'].window_hours.eq(18).all()
+    assert frames['maxt'].maxt.eq(40).all()
+    assert frames['mint'].mint.eq(10).all()
+    assert frames['maxt'].window_hours.eq(12).all()
+    assert frames['mint'].window_hours.eq(12).all()
+    assert frames['maxt'].window_start.dt.hour.eq(12).all()
+    assert frames['maxt'].valid_time.dt.hour.eq(0).all()
+    assert frames['mint'].window_start.dt.hour.eq(0).all()
+    assert frames['mint'].valid_time.dt.hour.eq(12).all()
     assert frames['minrh_native'].window_hours.unique().tolist()==[6.,18.]
     assert frames['minrh_native'].minrh.eq(20).all()
     assert frames['minrh'].minrh.eq(60).all()  # Daytime lower values excluded.
@@ -213,3 +224,43 @@ def test_lock_and_conflicting_station_coordinates(tmp_path):
     path=tmp_path/'stations.csv'
     pd.DataFrame(dict(stid=['A','A'],latitude=[58.,59.],longitude=[-135.,-135.])).to_csv(path,index=False)
     with pytest.raises(ValueError,match='Conflicting'):load_stations(path,'alaska')
+
+
+@pytest.mark.parametrize('element,missing_hour',[('maxt','2026-11-09 13:00'),('mint','2026-11-09 01:00')])
+def test_temperature_missing_hour_omits_only_affected_station_window(dataset,stations,tmp_path,element,missing_hour):
+    times=pd.to_datetime(dataset.T_SFC.attrs['validTimes'][::2],unit='s')
+    dataset.T_SFC.values[times.get_loc(pd.Timestamp(missing_hour)),0,0]=-30000
+    frames,report=extract_file(write(dataset,tmp_path/'gap.nc'),stations,elements=[element])
+    counts=frames[element].groupby('station_id').size()
+    assert counts['A']==counts['B']-1
+    assert report['elements'][element]['incomplete_station_windows']>=1
+
+
+def test_native_temperature_migration_and_reimport(dataset,stations,tmp_path):
+    from migrate_ndfd_exp_temperatures import migration_plan
+    source=write(dataset,tmp_path/'data.nc')
+    frames,report=extract_file(source,stations)
+    root=tmp_path/'model'
+    legacy={e:frames[e+'_native'] for e in ['maxt','mint']}
+    install_plan(monthly_plan(legacy,root),report,root)
+    original=(root/'ndfd_exp/maxt/2026_11_archive.parquet').read_bytes()
+    with pytest.raises(ValueError,match='migrate_ndfd_exp_temperatures'):
+        monthly_plan({'maxt':frames['maxt']},root)
+    plan=migration_plan(root)
+    manifest=install_plan(plan,{'operation':'migration'},root)
+    assert (manifest.parent/'maxt/2026_11_archive.parquet').read_bytes()==original
+    assert pd.read_parquet(root/'ndfd_exp/maxt/2026_11_archive.parquet').empty
+    for element in ['maxt','mint']:
+        pd.testing.assert_frame_equal(pd.read_parquet(root/f'ndfd_exp/{element}_native/2026_11_archive.parquet'),legacy[element])
+    assert not migration_plan(root)
+    install_plan(monthly_plan(frames,root),report,root)
+    assert pd.read_parquet(root/'ndfd_exp/maxt/2026_11_archive.parquet').window_hours.eq(12).all()
+    assert not monthly_plan(frames,root)
+
+
+def test_missing_hourly_temperature_does_not_substitute_native(dataset,stations,tmp_path):
+    del dataset['T_SFC']
+    frames,report=extract_file(write(dataset,tmp_path/'native_only.nc'),stations,
+        elements=['maxt','mint','maxt_native','mint_native'])
+    assert set(frames)=={'maxt_native','mint_native'}
+    assert report['elements']['maxt']=={'status':'missing_variable','required':['T_SFC']}
