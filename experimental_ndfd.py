@@ -293,6 +293,7 @@ def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
             old = ((existing or {}).get(destination) if destination in (existing or {}) else
                 (pd.read_parquet(destination) if destination.exists() else pd.DataFrame()))
             conflicts=0
+            samples=[]
             if not old.empty:
                 if element in ('maxt','mint') and old.get('statistic',pd.Series(dtype=str)).isin(['maximum','minimum']).any():
                     raise ValueError('Legacy native temperature records found; run migrate_ndfd_exp_temperatures.py before importing derived temperatures')
@@ -305,14 +306,27 @@ def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
                     left,right = a.reindex(index=shared,columns=compare),b.reindex(index=shared,columns=compare)
                     equal = left.eq(right)|(left.isna()&right.isna())
                     conflicts = int((~equal.all(axis=1)).sum())
+                    for key in shared[~equal.all(axis=1).to_numpy()][:10]:
+                        changed = [c for c in compare if not equal.loc[key,c]]
+                        samples.append(dict(zip(KEYS,key),changes={
+                            c:{'old':left.loc[key,c],'new':right.loc[key,c]} for c in changed},
+                            old_source_sha256=a.loc[key].get('source_sha256'),
+                            new_source_sha256=b.loc[key].get('source_sha256'),
+                            old_grid={c:a.loc[key].get(c) for c in ('grid_latitude','grid_longitude','grid_distance_km')},
+                            new_grid={c:b.loc[key].get(c) for c in ('grid_latitude','grid_longitude','grid_distance_km')}))
                     if conflicts and not replace_conflicts:
-                        raise ValueError(f'{destination}: {conflicts} conflicting rows; preview/review then use --replace-conflicts')
+                        raise ValueError(f'{destination}: {conflicts} conflicting rows; '
+                            'preview/review then use --replace-conflicts. '
+                            'First conflicts (up to 10): '+json.dumps(samples,default=json_default))
                     # Identical forecasts are no-ops even if provenance differs.
                     unchanged = shared[equal.all(axis=1).to_numpy()]
                     new = new.loc[~pd.MultiIndex.from_frame(new[KEYS]).isin(unchanged)]
             if new.empty: continue
             combined = pd.concat([old,new],ignore_index=True).drop_duplicates(KEYS,keep='last').reset_index(drop=True)
-            plan.append((destination,combined,dict(new_or_replaced_rows=len(new),conflicts=conflicts)))
+            details=dict(new_or_replaced_rows=len(new),conflicts=conflicts)
+            if samples:
+                details['conflict_samples']=samples
+            plan.append((destination,combined,details))
     return plan
 
 

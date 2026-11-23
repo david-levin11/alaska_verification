@@ -198,7 +198,14 @@ station selection, validity ranges, missing values, and changed destinations.
 Reruns skip matching records. Keys include station, initialization, valid time,
 and both window bounds. Conflicting values stop the import by default. To review
 an intentional revision, preview with `--replace-conflicts`; then add `--apply`
-to install it with backups. Changed period bounds represent different records;
+to install it with backups. Conflict diagnostics show up to ten affected
+station/windows per file, changed columns with old/new values, source hashes,
+and old/new extraction coordinates and distances. They are also saved in the
+installation manifest when replacements are applied. Fresh Synoptic inventories
+can change station coordinates and consequently the selected grid point; new
+station IDs alone do not create conflicts with existing keys. Identical source
+hashes plus changed extraction coordinates help distinguish a station-mapping
+change from a different export. Changed period bounds represent different records;
 replacing an entire superseded issuance with different periods requires review
 and removal of those obsolete records separately.
 

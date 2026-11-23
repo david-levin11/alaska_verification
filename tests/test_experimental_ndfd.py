@@ -264,3 +264,24 @@ def test_missing_hourly_temperature_does_not_substitute_native(dataset,stations,
         elements=['maxt','mint','maxt_native','mint_native'])
     assert set(frames)=={'maxt_native','mint_native'}
     assert report['elements']['maxt']=={'status':'missing_variable','required':['T_SFC']}
+
+
+def test_conflicts_identify_station_changed_values_and_mapping(dataset,stations,tmp_path):
+    path=write(dataset,tmp_path/'source.nc')
+    frames,report=extract_file(path,stations,elements=['maxt_native'])
+    root=tmp_path/'model'
+    install_plan(monthly_plan(frames,root),report,root)
+    revised=frames['maxt_native'].copy()
+    selected=revised.station_id.eq('A')
+    revised.loc[selected,'maxt']=20.
+    revised.loc[selected,'grid_latitude']+=0.01
+    with pytest.raises(ValueError,match='6 conflicting rows') as error:
+        monthly_plan({'maxt_native':revised},root)
+    samples=json.loads(str(error.value).split('First conflicts (up to 10): ')[1])
+    assert len(samples)==6
+    assert {s['station_id'] for s in samples}=={'A'}
+    assert samples[0]['changes']['maxt']=={'old':54.2,'new':20.}
+    assert samples[0]['old_source_sha256']==samples[0]['new_source_sha256']
+    assert samples[0]['old_grid']['grid_latitude']!=samples[0]['new_grid']['grid_latitude']
+    replacement=monthly_plan({'maxt_native':revised},root,replace_conflicts=True)
+    assert len(replacement[0][2]['conflict_samples'])==6
