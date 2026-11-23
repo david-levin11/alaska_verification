@@ -316,8 +316,7 @@ def monthly_plan(frames,archive_root,*,replace_conflicts=False,existing=None):
                             new_grid={c:b.loc[key].get(c) for c in ('grid_latitude','grid_longitude','grid_distance_km')}))
                     if conflicts and not replace_conflicts:
                         raise ValueError(f'{destination}: {conflicts} conflicting rows; '
-                            'preview/review then use --replace-conflicts. '
-                            'First conflicts (up to 10): '+json.dumps(samples,default=json_default))
+                            'use --replace-conflicts to replace them with backups on --apply')
                     # Identical forecasts are no-ops even if provenance differs.
                     unchanged = shared[equal.all(axis=1).to_numpy()]
                     new = new.loc[~pd.MultiIndex.from_frame(new[KEYS]).isin(unchanged)]

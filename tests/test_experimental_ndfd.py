@@ -202,7 +202,11 @@ def test_cli_config_paths_preview_apply_and_offline_inventory(dataset,stations,t
     before=target.read_bytes()
     assert main(['--config',str(config),'--apply'])==0
     assert target.read_bytes()==before
-    assert 'UNCHANGED' in capsys.readouterr().out
+    output=capsys.readouterr().out
+    assert 'UNCHANGED' in output
+    assert 'Products extracted=1; archive updates=' in output
+    assert 'missing_values' not in output and 'first_projection' not in output
+    assert 'conflict_samples' not in output and 'grid_latitude' not in output
 
 
 def test_preview_detects_conflicts_between_batch_inputs(dataset,stations,tmp_path):
@@ -266,7 +270,7 @@ def test_missing_hourly_temperature_does_not_substitute_native(dataset,stations,
     assert report['elements']['maxt']=={'status':'missing_variable','required':['T_SFC']}
 
 
-def test_conflicts_identify_station_changed_values_and_mapping(dataset,stations,tmp_path):
+def test_conflict_details_retained_without_cluttering_error(dataset,stations,tmp_path):
     path=write(dataset,tmp_path/'source.nc')
     frames,report=extract_file(path,stations,elements=['maxt_native'])
     root=tmp_path/'model'
@@ -277,11 +281,13 @@ def test_conflicts_identify_station_changed_values_and_mapping(dataset,stations,
     revised.loc[selected,'grid_latitude']+=0.01
     with pytest.raises(ValueError,match='6 conflicting rows') as error:
         monthly_plan({'maxt_native':revised},root)
-    samples=json.loads(str(error.value).split('First conflicts (up to 10): ')[1])
+    assert 'station_id' not in str(error.value)
+    assert 'grid_latitude' not in str(error.value)
+    replacement=monthly_plan({'maxt_native':revised},root,replace_conflicts=True)
+    samples=replacement[0][2]['conflict_samples']
     assert len(samples)==6
     assert {s['station_id'] for s in samples}=={'A'}
     assert samples[0]['changes']['maxt']=={'old':54.2,'new':20.}
     assert samples[0]['old_source_sha256']==samples[0]['new_source_sha256']
     assert samples[0]['old_grid']['grid_latitude']!=samples[0]['new_grid']['grid_latitude']
-    replacement=monthly_plan({'maxt_native':revised},root,replace_conflicts=True)
     assert len(replacement[0][2]['conflict_samples'])==6

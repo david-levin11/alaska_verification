@@ -198,10 +198,10 @@ station selection, validity ranges, missing values, and changed destinations.
 Reruns skip matching records. Keys include station, initialization, valid time,
 and both window bounds. Conflicting values stop the import by default. To review
 an intentional revision, preview with `--replace-conflicts`; then add `--apply`
-to install it with backups. Conflict diagnostics show up to ten affected
-station/windows per file, changed columns with old/new values, source hashes,
-and old/new extraction coordinates and distances. They are also saved in the
-installation manifest when replacements are applied. Fresh Synoptic inventories
+to install it with backups. Console output shows concise product, update, row,
+and conflict counts. Detailed period/coverage statistics and up to ten conflict
+samples per file (changed values, source hashes, and extraction coordinates)
+are retained in the installation manifest rather than printed. Fresh Synoptic inventories
 can change station coordinates and consequently the selected grid point; new
 station IDs alone do not create conflicts with existing keys. Identical source
 hashes plus changed extraction coordinates help distinguish a station-mapping

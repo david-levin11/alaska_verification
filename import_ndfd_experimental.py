@@ -116,9 +116,10 @@ def main(argv=None):
             frames,report = extract_file(source,stations,elements=elements,max_distance_km=distance,cache=cache)
             print(f'Initialization: {report["init_time"]}; stations selected={report["stations_selected"]}, '
                   f'rejected={len(report["stations_rejected"])}')
-            for element,details in report['elements'].items(): print(f'  {element}: {details}')
             plan = monthly_plan(frames,root,replace_conflicts=args.replace_conflicts,existing=pending)
-            for destination,_,details in plan: print(f'  {destination}: {details}')
+            print(f'Products extracted={len(frames)}; archive updates={len(plan)}; '
+                  f'new/replaced rows={sum(details["new_or_replaced_rows"] for _,_,details in plan)}; '
+                  f'conflicts={sum(details["conflicts"] for _,_,details in plan)}')
             if not plan:
                 print('UNCHANGED: matching forecasts already archived')
             elif args.apply:
