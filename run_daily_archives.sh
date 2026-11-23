@@ -22,7 +22,7 @@
 #   OBS_ELEMENTS="..."   # optional override for OBS elements
 #   RUN_NDFD_EXP=1 NDFD_EXP_INPUT_DIR=/local/exports  # opt-in experimental workflow
 #   NDFD_EXP_ARCHIVE_ROOT=/local/model              # default: regional model/
-#   RUN_OBS_EXP=1 RUN_OBS_12HR=1                    # both default to RUN_NDFD_EXP
+#   RUN_OBS_EXP=1 RUN_OBS_12HR=1                    # both follow RUN_OBS (default 1)
 #   OBS_EXP_LOOKBACK_DAYS=7                         # retry completed recent windows
 
 set -Eeuo pipefail
@@ -63,10 +63,10 @@ case "$SOURCE_STORAGE" in
 esac
 
 # Experimental data are local files, independently of SOURCE_STORAGE.
-# Defaults preserve the existing production job until explicitly enabled.
+# Forecast imports are opt-in; observation profiles follow the daily OBS job.
 RUN_NDFD_EXP="${RUN_NDFD_EXP:-0}"
-RUN_OBS_EXP="${RUN_OBS_EXP:-$RUN_NDFD_EXP}"
-RUN_OBS_12HR="${RUN_OBS_12HR:-$RUN_NDFD_EXP}"
+RUN_OBS_EXP="${RUN_OBS_EXP:-${RUN_OBS:-1}}"
+RUN_OBS_12HR="${RUN_OBS_12HR:-${RUN_OBS:-1}}"
 NDFD_EXP_ARCHIVE_ROOT="${NDFD_EXP_ARCHIVE_ROOT:-${REGION_PREFIX}model}"
 NDFD_EXP_REPLACE_CONFLICTS="${NDFD_EXP_REPLACE_CONFLICTS:-0}"
 NDFD_EXP_RECURSIVE="${NDFD_EXP_RECURSIVE:-0}"
@@ -402,7 +402,7 @@ if [[ "$RUN_OBS_EXP" == 1 || "$RUN_OBS_12HR" == 1 ]]; then
     EXP_OBS_END="$(date -u -d "${BASE_DATE} +1 day 00:00" +%Y%m%d%H%M)"
   fi
   # These run even if there is no new file or the import reports a failure:
-  # previously archived forecasts still have observation windows to verify.
+  # full daily observation periods do not require any forecast archives.
   for profile in experimental 12hr; do
     [[ "$profile" != experimental || "$RUN_OBS_EXP" == 1 ]] || continue
     [[ "$profile" != 12hr || "$RUN_OBS_12HR" == 1 ]] || continue

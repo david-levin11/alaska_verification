@@ -159,14 +159,14 @@ so they are not a twelve-hour reference for the new forecasts.
 
 | Observation archive | Matching forecast | Periods |
 |---|---|---|
-| `model/obs_exp/maxt/` | `ndfd_exp/maxt_native/` | Exact archived forecast bounds, including partial first periods |
-| `model/obs_exp/mint/` | `ndfd_exp/mint_native/` | Exact archived forecast bounds |
-| `model/obs_exp/minrh/` | `ndfd_exp/minrh_native/` | Exact archived forecast bounds, including partial first periods |
-| `model/obs_12hr/maxt/` | `ndfd_exp/maxt/` and twelve-hour operational MaxT | 12Z–00Z |
-| `model/obs_12hr/mint/` | `ndfd_exp/mint/` and twelve-hour operational MinT | 00Z–12Z |
+| `model/obs_exp/maxt/` | `ndfd_exp/maxt_native/` | Daily 14Z–05Z (15h), plus additional archived forecast bounds |
+| `model/obs_exp/mint/` | `ndfd_exp/mint_native/` | Daily 02Z–20Z (18h), plus additional archived forecast bounds |
+| `model/obs_exp/minrh/` | `ndfd_exp/minrh_native/` | Daily 12Z–06Z (18h), plus additional archived forecast bounds |
+| `model/obs_12hr/maxt/` | Derived `ndfd_exp/maxt/` | 12Z–00Z |
+| `model/obs_12hr/mint/` | Derived `ndfd_exp/mint/` | 00Z–12Z |
 | `model/obs_12hr/minrh/` | `ndfd_exp/minrh/` and twelve-hour operational MinRH | 18Z–06Z |
 
-First import/migrate forecasts. Preview observation extraction, then add
+Forecast archives are optional. Preview observation extraction, then add
 `--apply` to write. These commands work in PowerShell and Linux shells:
 
 ```sh
@@ -176,15 +176,18 @@ python run_obs_forecast_windows.py --profile 12hr --archive-root model --start "
 
 Both profiles default to `maxt mint minrh`. Use `--elements maxt mint` for just
 temperatures. `--forecast-root` overrides the default `<archive-root>/ndfd_exp`
-for native extraction. Start/end select **window endpoints inclusively**.
+for optional additional native windows. Start/end select **window endpoints inclusively**.
 Archive filenames use the **endpoint month**; this differs from forecasts'
 initialization-month partitioning. Warm-up requests include the preceding day
 where required. Identical station/window pairs across forecast issuances are
 queried once; windows with the same endpoint but different starts remain separate.
 
-Both profiles require `SYNOPTIC_API_KEY`. Native extraction queries the exact
-station IDs in native forecast archives, even historical IDs absent from fresh
-metadata. The twelve-hour profile uses fresh shared all-status regional discovery.
+Both profiles require `SYNOPTIC_API_KEY` and use fresh shared all-status regional
+discovery for every daily window, independent of model files. The experimental
+profile additionally queries exact station/window pairs from native forecast
+archives when present, including partial/unusual periods and historical IDs
+absent from current metadata. Duplicate full windows are queried once. The
+regular experimental schedule follows the inspected export periods in the table.
 Aggregation uses all valid available reports within **[start,end)**, preferring
 one primary sensor per station/window with derived/secondary sensor fallback.
 It does not combine sensors, interpolate, or discard later valid windows after a
@@ -205,13 +208,17 @@ endpoint alone does not make native and twelve-hour observations interchangeable
 
 ## Optional daily production workflow
 
-Experimental processing is disabled by default. On Linux, configure these
-settings in the existing launcher before calling the daily wrapper:
+Experimental **forecast imports** are disabled by default. Both new observation
+profiles follow `RUN_OBS` (normally `1`), so they run every day even if no
+experimental forecast has ever been archived. Set the archive root in the
+existing Linux launcher; enable forecast importing only if desired:
 
 ```sh
 export RUN_NDFD_EXP=1
 export NDFD_EXP_INPUT_DIR=/data/experimental_ndfd_exports
 export NDFD_EXP_ARCHIVE_ROOT=/data/alaska_verification/model
+export RUN_OBS_EXP=1
+export RUN_OBS_12HR=1
 
 bash run_daily_archives.sh --region alaska
 ```
@@ -229,7 +236,8 @@ When enabled, the wrapper runs the experimental stages after the ordinary model,
 NDFD, OBS, and REFS work:
 
 1. Import the matching local NetCDF/gzip exports with `--allow-empty --apply`.
-2. Independently collect `obs_exp` for native windows in archived forecasts.
+2. Collect `obs_exp` for regular full native windows every day, adding any
+   partial/unusual periods found in existing forecasts.
 3. Collect `obs_12hr` for the standard MaxT/MinT/MinRH windows.
 
 An existing input directory with **no matching exports is a successful skip**,
@@ -241,17 +249,18 @@ arriving during cron, copy using a nonmatching temporary suffix (for example
 `.part`), then rename to `.nc.gz` after the transfer is complete.
 
 Observation collection does not depend on a new file arriving or a successful
-import that day. It uses the saved forecast periods and queries only endpoints
-that have finished. Missing native products and dates with no matching native
-periods are successful skips, without observation API requests. The standalone
-observation runner also caps its requested endpoint at the current UTC time.
+import that day, or on the existence of any native forecast archive. It builds
+the daily periods directly and queries only endpoints that have finished.
+The standalone observation runner caps its requested endpoint at the current
+UTC time. Additional archived forecast windows are optional; their absence
+does not suppress any scheduled observation period.
 
-By default both new observation profiles follow `RUN_NDFD_EXP`. Overrides:
+By default both new observation profiles follow `RUN_OBS`. Overrides:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `RUN_OBS_EXP` | `RUN_NDFD_EXP` | Enable native-window observations independently of importing new files |
-| `RUN_OBS_12HR` | `RUN_NDFD_EXP` | Enable twelve-hour observations, even without native forecasts |
+| `RUN_OBS_EXP` | `RUN_OBS` (normally `1`) | Daily experimental native-window observations, with or without forecasts |
+| `RUN_OBS_12HR` | `RUN_OBS` (normally `1`) | Daily twelve-hour observations, with or without forecasts |
 | `OBS_EXP_LOOKBACK_DAYS` | `7` | Retry the last seven completed UTC days for both profiles |
 | `NDFD_EXP_STATION_CSV` | unset | Optional fixed forecast station inventory |
 | `NDFD_EXP_RECURSIVE` | `0` | Search input subdirectories when `1` |

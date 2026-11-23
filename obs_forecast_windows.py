@@ -36,15 +36,25 @@ def native_periods(root,element,start,end,*,allow_missing=False):
     return periods.loc[periods.window_end.between(utc_timestamp(start),utc_timestamp(end))].reset_index(drop=True)
 
 
-def standard_periods(stations,element,start,end):
+def daily_periods(stations,start,end,*,endpoint_hour,duration_hours):
     start,end = utc_timestamp(start),utc_timestamp(end)
-    endpoint_hour = {'maxt':0,'mint':12,'minrh':6}[element]
     endpoints = pd.date_range(start.normalize()+pd.Timedelta(hours=endpoint_hour),
         end.normalize()+pd.Timedelta(hours=endpoint_hour),freq='D')
     endpoints = endpoints[(endpoints>=start)&(endpoints<=end)]
     return validate_periods(pd.DataFrame([
-        dict(station_id=s,window_start=t-pd.Timedelta(hours=12),window_end=t)
+        dict(station_id=s,window_start=t-pd.Timedelta(hours=duration_hours),window_end=t)
         for s in stations for t in endpoints],columns=['station_id','window_start','window_end']))
+
+
+def standard_periods(stations,element,start,end):
+    return daily_periods(stations,start,end,
+        endpoint_hour={'maxt':0,'mint':12,'minrh':6}[element],duration_hours=12)
+
+
+def experimental_periods(stations,element,start,end):
+    """Full native verification periods, independent of forecast availability."""
+    endpoint,duration = {'maxt':(5,15),'mint':(20,18),'minrh':(6,18)}[element]
+    return daily_periods(stations,start,end,endpoint_hour=endpoint,duration_hours=duration)
 
 
 def aggregate_windows(stations,periods,element,metadata,*,max_gap_minutes=90):

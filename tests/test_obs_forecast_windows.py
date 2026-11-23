@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from obs_forecast_windows import (validate_periods,native_periods,standard_periods,
+from obs_forecast_windows import (validate_periods,native_periods,standard_periods,experimental_periods,
     aggregate_windows,fetch_windows,observation_plan)
 from experimental_ndfd import install_plan
 
@@ -94,9 +94,13 @@ def source(monkeypatch):
         calls.append(params)
         times=pd.date_range(pd.to_datetime(params['start'],format='%Y%m%d%H%M',utc=True),
             pd.to_datetime(params['end'],format='%Y%m%d%H%M',utc=True),freq='h')
+        row=station(times,list(range(len(times))))
+        units={'air_temp':'F'}
+        if params['vars']=='relative_humidity':
+            row['OBSERVATIONS']['relative_humidity_set_1']=list(range(len(times)))
+            units={'relative_humidity':'%'}
         return SimpleNamespace(raise_for_status=lambda:None,json=lambda:dict(
-            SUMMARY={'RESPONSE_CODE':1},UNITS={'air_temp':'F'},
-            STATION=[station(times,list(range(len(times))))]))
+            SUMMARY={'RESPONSE_CODE':1},UNITS=units,STATION=[row]))
     monkeypatch.setattr(requests,'get',get)
     archiver=SimpleNamespace(url='https://example.test',api_token='DO_NOT_PRINT',hfmetar='0',
         initial_wait=0,max_retries=2,station_metadata={},_chunk_station_ids=lambda ids:[ids])
@@ -190,15 +194,57 @@ def test_no_data_response_and_all_missing_windows(source,monkeypatch):
     assert aggregate_windows([station(times,[None]*12)],p,'mint',{}).empty
 
 
-def test_empty_daily_native_archives_skip_without_api_key(tmp_path,monkeypatch,capsys):
+@pytest.mark.parametrize('element,hours,endpoint', [('maxt',15,5),('mint',18,20),('minrh',18,6)])
+def test_daily_observations_write_without_any_forecast_archives(source,tmp_path,monkeypatch,element,hours,endpoint):
     import archiver_config as config
     import run_obs_forecast_windows as runner
-    monkeypatch.setattr(config,'API_KEY','')
+    from obs_archiver import ObsArchiver
+    archiver,calls=source
+    monkeypatch.setattr(config,'API_KEY','TEST')
+    monkeypatch.setattr(ObsArchiver,'__init__',lambda self,cfg:self.__dict__.update(archiver.__dict__))
+    monkeypatch.setattr(ObsArchiver,'get_station_metadata',lambda self:['A'])
     assert runner.main(['--archive-root',str(tmp_path),'--start','2026-06-01',
-        '--end','2026-06-02','--allow-empty','--apply'])==0
-    assert 'no completed native forecast windows' in capsys.readouterr().out
-    assert not list(tmp_path.glob('**/*.parquet'))
+        '--end','2026-06-01 23:59','--elements',element,'--apply'])==0
+    d=pd.read_parquet(tmp_path/f'obs_exp/{element}/2026_06_archive.parquet')
+    assert len(d)==1 and d.window_hours.tolist()==[float(hours)]
+    assert d.window_end.dt.hour.tolist()==[endpoint]
+    assert calls and not (tmp_path/'ndfd_exp').exists()
     assert native_periods(tmp_path,'maxt','2026-06-01','2026-06-02',allow_missing=True).empty
+
+
+@pytest.mark.parametrize('element,hours,begin,endpoint',[
+    ('maxt',15,'2026-05-31 14:00Z','2026-06-01 05:00Z'),
+    ('mint',18,'2026-06-01 02:00Z','2026-06-01 20:00Z'),
+    ('minrh',18,'2026-05-31 12:00Z','2026-06-01 06:00Z'),
+])
+def test_regular_experimental_daily_bounds(element,hours,begin,endpoint):
+    d=experimental_periods(['A'],element,'2026-06-01','2026-06-01 23:59')
+    assert len(d)==1
+    assert d.window_start.iloc[0]==pd.Timestamp(begin)
+    assert d.window_end.iloc[0]==pd.Timestamp(endpoint)
+    assert (d.window_end-d.window_start).dt.total_seconds().iloc[0]==hours*3600
+
+
+def test_partial_forecast_adds_window_without_duplicate_regular_period(source,tmp_path,monkeypatch):
+    import archiver_config as config
+    import run_obs_forecast_windows as runner
+    from obs_archiver import ObsArchiver
+    archiver,_=source
+    monkeypatch.setattr(config,'API_KEY','TEST')
+    monkeypatch.setattr(ObsArchiver,'__init__',lambda self,cfg:self.__dict__.update(archiver.__dict__))
+    monkeypatch.setattr(ObsArchiver,'get_station_metadata',lambda self:['A'])
+    directory=tmp_path/'ndfd_exp/maxt_native';directory.mkdir(parents=True)
+    pd.DataFrame([period('2026-05-31 14:00','2026-06-01 05:00'),
+        period('2026-06-01 00:00','2026-06-01 05:00')]).to_parquet(directory/'2026_05_archive.parquet')
+    args=['--archive-root',str(tmp_path),'--start','2026-06-01','--end','2026-06-01 23:59','--elements','maxt','--apply']
+    runner.main(args)
+    target=tmp_path/'obs_exp/maxt/2026_06_archive.parquet'
+    d=pd.read_parquet(target)
+    assert len(d)==2 and set(d.window_hours)=={5.,15.}
+    assert not d.duplicated(['stid','window_start','window_end']).any()
+    before=target.read_bytes()
+    runner.main(args)
+    assert target.read_bytes()==before
 
 
 def test_future_observation_windows_skip_without_requests(tmp_path,capsys):

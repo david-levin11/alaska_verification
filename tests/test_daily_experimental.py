@@ -12,7 +12,7 @@ def experimental(records):
 def setup(tmp_path):
     inputs=tmp_path/'incoming exports';inputs.mkdir()
     return dict(MODELS='urma',RUN_REFS='0',RUN_NDFD_EXP='1',NDFD_EXP_INPUT_DIR=str(inputs),
-        NDFD_EXP_ARCHIVE_ROOT=str(tmp_path/'model with spaces'))
+        NDFD_EXP_ARCHIVE_ROOT=str(tmp_path/'model with spaces'),RUN_OBS_EXP='1',RUN_OBS_12HR='1')
 
 
 def test_import_and_both_obs_profiles_run_on_empty_input(tmp_path):
@@ -59,6 +59,15 @@ def test_profiles_can_run_without_new_import_and_preserve_explicit_range(tmp_pat
     imports,obs=experimental(records)
     assert not imports and len(obs)==3
     assert all('--start' in c and '202611300000' in c and '202612020000' in c for c in obs)
+
+
+def test_default_observation_profiles_run_without_experimental_import_setting(tmp_path):
+    result,records,_,_=run_wrapper(tmp_path,MODELS='urma',RUN_REFS='0',RUN_OBS='1',
+        RUN_NDFD_EXP='0',RUN_OBS_EXP='',RUN_OBS_12HR='')
+    assert result.returncode==0
+    imports,obs=experimental(records)
+    assert not imports and len(obs)==6
+    assert {c[c.index('--profile')+1] for c in obs}=={'experimental','12hr'}
 
 
 def test_dry_run_and_hawaii_root(tmp_path):
