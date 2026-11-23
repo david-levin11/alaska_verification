@@ -210,20 +210,26 @@ endpoint alone does not make native and twelve-hour observations interchangeable
 
 Experimental **forecast imports** are disabled by default. Both new observation
 profiles follow `RUN_OBS` (normally `1`), so they run every day even if no
-experimental forecast has ever been archived. Set the archive root in the
-existing Linux launcher; enable forecast importing only if desired:
+experimental forecast has ever been archived. The default output is the
+repository's ordinary regional `model/` directory: `model/ndfd_exp`,
+`model/obs_exp`, and `model/obs_12hr` for Alaska. No special output directory or
+archive-root setting is required. Enable forecast importing by adding these
+settings once to the existing Linux launcher that cron invokes:
 
 ```sh
 export RUN_NDFD_EXP=1
 export NDFD_EXP_INPUT_DIR=/data/experimental_ndfd_exports
-export NDFD_EXP_ARCHIVE_ROOT=/data/alaska_verification/model
 export RUN_OBS_EXP=1
 export RUN_OBS_12HR=1
 
 bash run_daily_archives.sh --region alaska
 ```
 
-The input directory must already exist. The archive root is the local **model
+Cron reuses that saved launcher configuration on every invocation; nobody needs
+to supply the input path manually on each run. Put the configuration in the
+launcher or cron environment, rather than only exporting it in an interactive
+terminal. The input directory must already exist. If production uses a custom
+archive location, optional `NDFD_EXP_ARCHIVE_ROOT` selects its local **model
 directory**, shared by `ndfd_exp/`, `obs_exp/`, and `obs_12hr/`. These products
 remain local even when other sources use `SOURCE_STORAGE=s3`. Configure the
 region and input directory separately for each regional launcher; do not feed
