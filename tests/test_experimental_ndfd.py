@@ -35,7 +35,7 @@ def dataset():
     add('MinT_SFC',pd.date_range(start+pd.Timedelta(hours=2),periods=6,freq='D'),18,'F',16.4)
     add('MinRH_SFC',[start]+list(pd.date_range(start+pd.Timedelta(hours=12),periods=5,freq='D')),
         [6]+[18]*5,'%',20)
-    # Hourly RH begins at f072, before the f084 dump start, and runs past f168.
+    # Retain hourly data at f060 before the f072 dump start, and past f168.
     times = pd.date_range(start-pd.Timedelta(hours=12),start+pd.Timedelta(days=5),freq='h')
     add('RH_SFC',times,1,'%',60)
     data.RH_SFC.values[(times.hour>=6)&(times.hour<18)] = 5
@@ -59,12 +59,12 @@ def test_all_fields_native_timing_derived_windows_and_domain(dataset,stations,tm
     source = write(dataset,tmp_path/'VRH_Fcst_ext_20261109_1200.nc')
     frames,report = extract_file(source,stations)
     assert set(frames)=={'wind','gust','precip6hr','maxt','mint','maxt_native','mint_native','minrh_native','rh','minrh'}
-    assert report['init_time']=='2026-11-05 12:00:00'
+    assert report['init_time']=='2026-11-06 00:00:00'
     assert report['stations_selected']==2
     assert {r['stid']:r['reason'] for r in report['stations_rejected']}=={'OUT':'outside_grid','FAR':'too_far_from_grid_point'}
-    assert frames['rh'].forecast_hour.min()==72
-    assert frames['wind'].forecast_hour.min()==84 and frames['wind'].forecast_hour.max()>168
-    assert frames['maxt_native'].forecast_hour.min()==89
+    assert frames['rh'].forecast_hour.min()==60
+    assert frames['wind'].forecast_hour.min()==72 and frames['wind'].forecast_hour.max()>168
+    assert frames['maxt_native'].forecast_hour.min()==77
     assert frames['maxt_native'].window_hours.unique().tolist()==[5.,15.]
     assert frames['mint_native'].window_hours.eq(18).all()
     assert frames['maxt'].maxt.eq(40).all()
@@ -159,7 +159,7 @@ def test_preview_apply_repeat_conflicts_and_backups(dataset,stations,tmp_path):
 
 
 def test_monthly_partition_uses_initialization_and_retains_cross_month_valid_times(dataset,stations,tmp_path):
-    dataset.attrs['startProcTime']='20261202_0000'  # init=November 28 12Z
+    dataset.attrs['startProcTime']='20261202_0000'  # init=November 29 00Z
     path=write(dataset,tmp_path/'crossmonth.nc')
     frames,_=extract_file(path,stations,elements=['rh'])
     frames['rh']['valid_time']=pd.Timestamp('2026-12-02')
@@ -291,3 +291,74 @@ def test_conflict_details_retained_without_cluttering_error(dataset,stations,tmp
     assert samples[0]['old_source_sha256']==samples[0]['new_source_sha256']
     assert samples[0]['old_grid']['grid_latitude']!=samples[0]['new_grid']['grid_latitude']
     assert len(replacement[0][2]['conflict_samples'])==6
+
+
+def test_72h_initialization_is_independent_of_filename(dataset,stations,tmp_path):
+    frames,report=extract_file(write(dataset,tmp_path/'arbitrary_name.nc'),stations,elements=['wind'])
+    assert report['initialization_offset_hours']==72
+    wind=frames['wind']
+    assert wind.initialization_offset_hours.eq(72).all()
+    assert wind.init_time.eq(pd.Timestamp('2026-11-06')).all()
+    assert wind.valid_time.min()==pd.Timestamp('2026-11-09')
+    assert wind.forecast_hour.min()==72
+    assert wind.forecast_hour.max()==192
+
+
+def test_initialization_repair_preserves_values_repartitions_and_is_repeatable(dataset,stations,tmp_path):
+    from repair_ndfd_exp_initialization import repair_plan
+    from experimental_ndfd import check_archive_initialization
+    dataset.attrs['startProcTime']='20261204_0000'
+    for var in dataset.data_vars.values():
+        if 'validTimes' in var.attrs:
+            var.attrs['validTimes']+=25*24*3600
+    frames,report=extract_file(write(dataset,tmp_path/'month.nc'),stations,elements=['wind'])
+    correct=frames['wind']
+    legacy=correct.loc[correct.station_id.eq('A')].copy()
+    legacy['init_time']-=pd.Timedelta(hours=12)
+    for c in ['forecast_hour','forecast_hour_start','forecast_hour_end']:
+        legacy[c]+=12
+    legacy=legacy.drop(columns='initialization_offset_hours').reset_index(drop=True)
+    root=tmp_path/'model'
+    install_plan(monthly_plan({'wind':legacy},root),{},root)
+    old_path=root/'ndfd_exp/wind/2026_11_archive.parquet'
+    before=old_path.read_bytes()
+    with pytest.raises(ValueError,match='repair_ndfd_exp_initialization'):
+        check_archive_initialization(root)
+    # Already-correct December rows must survive merging moved November rows.
+    install_plan(monthly_plan({'wind':correct.loc[correct.station_id.eq('B')].reset_index(drop=True)},root),{},root)
+    with pytest.raises(ValueError,match='repair_ndfd_exp_initialization'):
+        # Legacy records in any destination must not silently coexist.
+        monthly_plan({'wind':legacy},root)
+    plan,count=repair_plan(root)
+    assert count==21 and old_path.read_bytes()==before
+    manifest=install_plan(plan,{},root)
+    assert (manifest.parent/'wind/2026_11_archive.parquet').read_bytes()==before
+    assert pd.read_parquet(old_path).empty
+    result=pd.read_parquet(root/'ndfd_exp/wind/2026_12_archive.parquet')
+    keys=['station_id','valid_time']
+    pd.testing.assert_frame_equal(result.sort_values(keys).reset_index(drop=True)[correct.columns],
+        correct.sort_values(keys).reset_index(drop=True))
+    assert repair_plan(root)==([],0)
+    check_archive_initialization(root)
+    assert not monthly_plan(frames,root)
+
+
+def test_initialization_repair_rejects_unknown_offset_and_duplicates(dataset,stations,tmp_path):
+    from repair_ndfd_exp_initialization import repair_plan
+    frames,_=extract_file(write(dataset,tmp_path/'data.nc'),stations,elements=['wind'])
+    root=tmp_path/'model'
+    path=root/'ndfd_exp/wind/2026_11_archive.parquet';path.parent.mkdir(parents=True)
+    unknown=frames['wind'].assign(initialization_offset_hours=96)
+    unknown.to_parquet(path,index=False)
+    with pytest.raises(ValueError,match='Unrecognized initialization offset'):
+        repair_plan(root)
+    legacy=frames['wind'].copy()
+    legacy['init_time']-=pd.Timedelta(hours=12)
+    for c in ['forecast_hour','forecast_hour_start','forecast_hour_end']:
+        legacy[c]+=12
+    legacy['initialization_offset_hours']=84
+    pd.concat([legacy,frames['wind']],ignore_index=True).to_parquet(path,index=False)
+    before=path.read_bytes()
+    with pytest.raises(ValueError,match='duplicate station/run/window'):
+        repair_plan(root)
+    assert path.read_bytes()==before

@@ -58,10 +58,39 @@ The supported export is the floating-point format with aligned two-dimensional
 packing attributes, or malformed validity arrays cause an error rather than an
 assumed conversion. Each spatial slice is read separately to limit memory use.
 
-Initialization is `startProcTime - 84 hours`, using the export convention
+Initialization is `startProcTime - 72 hours`, using the export convention
 confirmed for these files. For example, `20261109_0000` gives initialization
-`2026-11-05 12:00 UTC`. Filenames and creation timestamps do not set initialization.
+`2026-11-06 00:00 UTC`. Filenames and creation timestamps do not set initialization.
 All projections are retained, including f072 and projections beyond f168.
+Rows and manifests record `initialization_offset_hours=72`.
+
+### Correct archives written with the earlier 84-hour offset
+
+Before reimporting into an existing experimental archive root, preview and apply:
+
+```sh
+python repair_ndfd_exp_initialization.py --archive-root experimental_test/model
+python repair_ndfd_exp_initialization.py --archive-root experimental_test/model --apply
+```
+
+Use `--archive-root model` for production. This changes only experimental
+forecasts under `ndfd_exp`: initialization moves forward twelve hours, and
+`forecast_hour`, `forecast_hour_start`, and `forecast_hour_end` decrease by
+twelve hours. Values, valid times, native window bounds, and observation archives
+remain unchanged. Records are repartitioned when initialization crosses a month
+boundary. Originals are backed up; writes are staged, validated, and rolled back
+on caught errors using the same importer lock/manifest mechanism.
+
+Rows without an offset marker are recognized as the earlier 84-hour importer
+format; explicit 84-hour markers are also supported. Rows already marked 72
+remain unchanged, so repeating the repair is safe. Unknown offsets, inconsistent
+time/lead metadata, and duplicate keys after correction stop the repair before
+installation. Use this only for archives from this importer. Preview checks all
+affected elements before writing. Reimporting afterward adds any new products
+or stations normally; it does not create a second copy under the old run time.
+The importer checks all forecast months and rejects a root with unrepaired rows,
+including when corrected initialization would land in a different monthly file.
+A fresh output root does not need this repair.
 
 For grid i, `validTimes[2*i]` is its start and `validTimes[2*i+1]` its end.
 Timestamps are UTC, stored without a timezone like the other model archives.

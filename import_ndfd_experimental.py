@@ -9,7 +9,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from experimental_ndfd import ELEMENTS,extract_file,monthly_plan,install_plan
+from experimental_ndfd import ELEMENTS,extract_file,monthly_plan,install_plan,check_archive_initialization
 
 
 def load_stations(csv_path,region):
@@ -107,10 +107,13 @@ def main(argv=None):
     paths = input_dir.rglob('*') if recursive else input_dir.iterdir()
     files = sorted(p for p in paths if p.is_file() and p.name.lower().endswith(('.nc','.nc.gz','.netcdf','.netcdf.gz')))
     if not files: parser.error(f'No NetCDF exports found in {input_dir}')
+    check_archive_initialization(root)
     stations = load_stations(path_setting('station_csv'),region)
     cache = {}
     pending = {}
     with archive_lock(root,args.apply):
+        if args.apply:
+            check_archive_initialization(root)
         for source in files:
             print(f'\nReading {source}',flush=True)
             frames,report = extract_file(source,stations,elements=elements,max_distance_km=distance,cache=cache)
