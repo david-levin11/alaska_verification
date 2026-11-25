@@ -35,14 +35,22 @@ class Repair(unittest.TestCase):
             with self.assertRaises(ValueError):repair(root,out)
             with self.assertRaises(ValueError):repair(out,Path(temp)/'twice')
 
-    def test_conflicting_keys_rejected(self):
+    def test_cross_file_duplicates_keep_second_occurrence(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'model';out=Path(temp)/'corrected'
-            source_file(root,'2026_09','2026-09-30 18:00')
-            source_file(root,'2026_10','2026-09-30 18:00')
-            with self.assertRaisesRegex(ValueError,'Cross-file duplicate'):repair(root,out)
-            import json
-            self.assertEqual(json.loads((out/'manifest.json').read_text())['status'],'INCOMPLETE')
+            first=source_file(root,'2026_09','2026-09-30 18:00')
+            second=source_file(root,'2026_10','2026-09-30 18:00')
+            revised=pd.read_parquet(second)
+            revised['qpf_p50']=0.75
+            revised.to_parquet(second,index=False)
+            original_hashes=[digest(first),digest(second)]
+            manifest=repair(root,out)
+            self.assertEqual(manifest['status'],'COMPLETE')
+            result=pd.read_parquet(out/'nbmqmd/precip6hr/2026_10_archive.parquet')
+            self.assertEqual(len(result),1)
+            self.assertEqual(result.qpf_p50.tolist(),[0.75])
+            self.assertEqual(manifest['outputs'][0]['duplicates_removed'],1)
+            self.assertEqual([digest(first),digest(second)],original_hashes)
 
     def test_in_place_backups_and_repeat_block(self):
         with tempfile.TemporaryDirectory() as temp:
